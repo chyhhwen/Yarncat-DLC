@@ -1,20 +1,22 @@
 /* ═══ 毛球貓 DLC：老大貓與健身貓 ═══
-   裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），
-   重開毛球貓，到「毛色」選「老大」或「健身」。要毛球貓 1.4.0 以上，商店版、GitHub 版都可以。
+   裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），重開毛球貓。
+   「毛色」多了「老大」「健身」；地上多了臥推椅、跑步機、高拉背機，每一隻貓都會去練（「家具」可以個別收起來）。
+   要毛球貓 1.5.0 以上，商店版、GitHub 版都可以。
 
    這個檔案是 JavaScript：毛球貓開機時讀進來跑（主程式 src/index.html 的「DLC」），主程式的東西都用得到；
-   角色要提供哪些函式，見主程式的「角色」。這裡的 const、function 只有這個檔案看得到，不會跟主程式撞名。
+   角色、家具要提供哪些函式，見主程式的「角色」「DLC 家具」。這裡的 const、function 只有這個檔案看得到，不會跟主程式撞名。
    測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次），按 c 換到老大、健身。
-   老大閒著時按 p 巡視地盤、f 趴下來啃魚乾；健身貓按 b 臥推、m 跑步機、l 高拉背機。 */
+   老大閒著時按 p 巡視地盤、f 趴下來啃魚乾；不管哪一隻，閒著時按 b 臥推、m 跑步機、l 高拉背機。 */
+if (typeof furnCall !== 'function') throw new Error('要毛球貓 1.5.0 以上');   // 1.4 的主程式還不會擺 DLC 的家具
 
 Object.assign(C, {
   Fb: '#d1a462', Fl: '#ecd29a', Fd: '#9c7440', Sx: '#f2d3b8',   // 老大貓：魚乾、臉上的疤
-  Hb: '#e0463c', Gp: '#4a4d5c', Gh: '#8a8fa3', Gl: '#6d7184', Bp: '#3d4a6b', Bq: '#5b6a90',   // 健身貓：頭帶、槓片和鐵架、椅墊
-  Tb: '#2f3140', Gs: '#1f3b2f', Gn: '#7be08a',          // 健身貓：跑帶、跑步機螢幕、速度格
+  Hb: '#e0463c', Gp: '#4a4d5c', Gh: '#8a8fa3', Gl: '#6d7184', Bp: '#3d4a6b', Bq: '#5b6a90',   // 健身貓的頭帶；健身器材：槓片和鐵架、椅墊
+  Tb: '#2f3140', Gs: '#1f3b2f', Gn: '#7be08a',          // 健身器材：跑帶、跑步機螢幕、速度格
 });
 Object.assign(COATS, {
   boss: { F: '#b8693a', D: '#7e4220', W: '#efe2cf', G: '#e0b83c' },   // 老大貓：深一點的橘紅大公貓，臉和魚乾見「老大貓」
-  gym: { F: '#ece7dd', D: '#cfc5b3', W: '#ffffff', G: '#6fb2dc' },    // 健身貓：白貓、藍眼睛，頭帶和器材見「健身貓」
+  gym: { F: '#ece7dd', D: '#cfc5b3', W: '#ffffff', G: '#6fb2dc' },    // 健身貓：白貓、藍眼睛，頭帶見「健身貓」
 });
 Object.assign(COAT_NAMES, { boss: '老大', gym: '健身' });
 
@@ -29,8 +31,9 @@ Object.assign(ZH, { patrol: '巡視地盤', gnaw: '啃魚乾', toFish: '去叼�
 Object.assign(RATE, { patrol: 14, gnaw: 12, toFish: 9, grab: 8, wantFish: 9, glare: 30 });
 PETTABLE.push('patrol', 'gnaw');
 HALF.fish = 4; TOP.fish = 4;
-// 叼得住魚乾的狀態：站著、坐著、趴著。其他狀態一進去就先把魚乾放下（away：在隔壁作客，魚乾跟著去）
-const CARRY = ['sit', 'stare', 'walk', 'patrol', 'rest', 'beg', 'leave', 'away', 'arrive', 'meet', 'toTree', 'toLitter', 'zoom'];
+// 叼得住魚乾的狀態：站著、坐著、趴著。其他狀態一進去就先把魚乾放下
+// （away：在隔壁作客，魚乾跟著去；走去健身器材也叼著，跳上去才放下）
+const CARRY = ['sit', 'stare', 'walk', 'patrol', 'rest', 'beg', 'leave', 'away', 'arrive', 'meet', 'toTree', 'toLitter', 'zoom', 'toBench', 'toMill', 'toLat'];
 // 你拿著魚乾時，這些狀態會放下手邊的事跟過來
 const FISHY = ['sit', 'lick', 'walk', 'stare', 'rest', 'patrol', 'gnaw', 'beg', 'toFish', 'grab'];
 function mouthOf(s) {                                  // 叼魚乾時嘴巴在哪（相對腳底正中間，面向右）：坐著、趴著、站著
@@ -241,59 +244,79 @@ CHARS.boss = {
 
 /* ═══ 健身貓：綁紅頭帶的白貓（毛色選「健身」就是牠） ═══
    外觀：沿用每個姿勢，額頭綁一條紅頭帶，腦後垂一小段結（dress）。
-   器材：臥推椅、跑步機、高拉背機。只有健身貓的地上才有，挑附近的空地擺；跟家具一樣可以拖、拎高放開會掉下來。
-   每隔幾分鐘自己挑一件去練；點一下器材叫牠馬上去練，練的時候再點一下：
+   器材每一隻貓都會用（見下面的「健身器材」），健身貓比較常自己去練。 */
+CHARS.gym = {
+  dress(pose, who) {                                   // 紅頭帶
+    const parts = pose[0].slice(), det = pose[1].slice();
+    const head = sideHead(parts);
+    if (head) {
+      const [hx, hy, , hh] = head;
+      let by = hy + 1;                                 // 綁在眼睛上面一格；頭比較扁（壓低、扒地、炸毛）的姿勢眼睛比較高，跟著往上
+      for (const [x, y, , , c] of pose[1])
+        if ((c === 'G' || c === 'E') && x >= hx && x < hx + 8 && y >= hy && y < hy + hh) by = Math.max(hy, Math.min(by, y - 1));
+      det.push([hx, by, 8, 1, 'Hb']);                  // 額頭一圈
+      parts.push([hx - 2, by, 2, 1, 'Hb'], [hx - 3, by + 1, 1, 1, 'Hb']);   // 腦後打結垂下來
+    } else if (who === 'cat' && cat.state === 'press') det.push([5, -3, 9, 1, 'Hb']);   // 躺著臥推：臉倒過來不是側臉，頭帶綁在額頭（眼睛下面）
+    return [parts, det];
+  },
+};
+
+/* ═══ 健身器材：臥推椅、跑步機、高拉背機（家具，每一隻貓都會用） ═══
+   跟貓砂盆它們一樣擺在地上，可以拖、拎高放開會掉下來；狀態視窗「家具」可以個別收起來（見主程式的「DLC 家具」）。
+   每一件隔一陣子貓就會自己去練一次，健身貓比較勤快。點一下器材，叫貓馬上過去練；練的時候再點一下：
      臥推椅（bench）：躺上去、把槓鈴從架子拿下來推幾下（推到底咬緊牙）、放回架子。從側面看，槓鈴是一片圓槓片。
      跑步機（mill）：  站上去原地跑；點一下加速（1～3）。最快撐太久會被往後擠，從尾巴甩出去、落地炸毛。
      高拉背機（lat）： 坐上去伸手抓握把往下拉，配重片跟著升降；點一下加重量（1～3）。最重拉不動，被拉離座椅，鬆手掉下來炸毛。
-   練到一半拖動器材、把貓拎起來：貓掉下來，槓鈴回到架子、握把回到頂上。 */
-const GEAR = {};                                       // 擺出來的器材 { bench, mill, lat }：{ x, y, vx, vy, held, … }，x 是正中間、y 是底邊
-const KINDS = ['bench', 'mill', 'lat'];
+   貓在器材上時 cat.in 是那件的代號。練到一半拖動器材、收起來、把貓拎起來：貓掉下來，槓鈴回到架子、握把回到頂上。 */
 const GO = { bench: 'toBench', mill: 'toMill', lat: 'toLat' };   // 走過去的狀態
 const USE = { bench: 'press', mill: 'run', lat: 'pull' };       // 在上面練的狀態
-const WALK = { toBench: 'bench', toMill: 'mill', toLat: 'lat' };
 // 怎麼上去：從器材哪邊走過去（from）、跳到哪（x, y，相對器材）、跳多高（h）。下來也從 from 那邊跳
 const MOUNT = { bench: { from: -20, x: -1, y: -8, h: 8 }, mill: { from: -26, x: -4, y: -5, h: 6 }, lat: { from: -20, x: -5, y: -10, h: 8 } };
+const HIT = {                                          // 點得到的地方（相對器材）：[x0, y0, x1, y1]
+  bench: [[-13, -9, 11, 1], [-3, -28, 8, -8]],         // 椅子、架子
+  mill: [[-18, -6, 17, 1], [5, -26, 17, 0]],           // 跑帶、柱子和螢幕
+  lat: [[-12, -11, 1, 1], [7, -45, 15, 1], [-1, -45, 11, -41]],   // 座椅、柱子、頂上的橫桿
+};
+// 在上面練時貓的點擊範圍（相對貓）：跑步機窄一點，前面的螢幕才點得到
+const BOX = { bench: [-16, -16, 14, 4], mill: [-13, -17, 9, 1], lat: [-14, -23, 8, 1] };
+const KEY = { bench: 'b', mill: 'm', lat: 'l' };     // 網頁版測試：閒著時按一下，馬上去練
 Object.assign(HALF, { bench: 13, mill: 18, lat: 17 });   // 拉背機的座椅在左邊：半寬放寬，貓坐上去時才不會被擠出畫面
 Object.assign(TOP, { bench: 28, mill: 26, lat: 45 });
-cat.on = null;                                         // 在哪件器材上（'bench'、'mill'、'lat'）
 cat.lift = false; cat.reps = 0;                        // 臥推：槓鈴在手上；這組要推幾下
-cat.fast = 0; cat.L = 17; cat.oops = false;            // fast：跑步機最快撐了多久；L：拉背時手臂多長；oops：被甩出去、鬆手掉下來，落地要炸毛
-let gymCD = rand(3600, 7200);                          // 還有幾格才想去練（第一次 1～2 分鐘後）
+cat.fast = 0; cat.L = 17; cat.strain = 0;              // fast：跑步機最快撐了多久；L：拉背時手臂多長；strain：最重拉不動，撐了多久
 Object.assign(ZH, { toBench: '走去臥推椅', press: '臥推', toMill: '走去跑步機', run: '在跑步機上跑步', toLat: '走去高拉背機', pull: '拉背' });
 Object.assign(RATE, { toBench: 9, press: 99, toMill: 9, run: 99, toLat: 9, pull: 99 });   // 99：動畫自己算，不靠 frame
 BUSY.push('press', 'run', 'pull');                     // 練到一半，丟毛球、換玩具都不理
 // 器材真的被拖走了嗎：按下去還沒怎麼動（可能只是點一下：加速、加重量）不算
 const dragged = g => g.held && (!drag || drag.obj !== g || drag.moved >= 1.5);
-const gearReady = k => GEAR[k] && !dragged(GEAR[k]) && GEAR[k].y >= FLOOR;
+const gearReady = k => FURN[k] && FURN[k].on && !dragged(FURN[k]) && FURN[k].y >= FLOOR;
+const using = k => cat.in === k && cat.state === USE[k];   // 貓正在這件上面練
 
-function freeSpot(half) {                              // 在貓附近找一塊空地：不壓到家具和其他器材；擺不下就算了，疊著放
-  const taken = [];
-  for (const [k, f] of Object.entries(FURN)) if (f.on) taken.push([f.x, HALF[k]]);
-  for (const [k, g] of Object.entries(GEAR)) taken.push([g.x, HALF[k]]);
-  const ok = x => x >= half && x <= W - half && taken.every(([tx, th]) => Math.abs(x - tx) >= half + th + 6);
-  for (let d = 30; d < W; d += 3) for (const s of [1, -1]) { const x = Math.round(cat.x + s * d); if (ok(x)) return x; }
-  return clamp(cat.x + 40, half, W - half);
-}
-function goGear(k) {                                   // 去練（點了器材、或時間到了）
-  if (!gearReady(k) || quiet || cat.energy < 30 || cat.perch || cat.in || cat.on) return false;
-  if (['sleep', 'pounce', 'leap', 'clutch', ...Object.keys(WALK), ...BUSY].includes(cat.state)) return false;
+function goGear(k) {                                   // 去練（點了器材、或時間到了）；正在走去別件的話，改走過來
+  if (cat.state === GO[k]) return true;
+  if (!gearReady(k) || quiet || cat.energy < 30 || cat.perch || cat.in) return false;
+  if (['sleep', 'pounce', 'leap', 'clutch', ...BUSY].includes(cat.state)) return false;
   setState(GO[k], trek(0.6));
   return true;
 }
+function mount(g) {                                    // 走到上來的那一頭了：跳上去，站穩就開始練
+  const k = g.kind, m = MOUNT[k];
+  cat.in = k;
+  hop(g.x + m.x, g.y + m.y, m.h, 26, () => {
+    if (!gearReady(k) || Math.abs(cat.x - g.x - m.x) > 2) return tumble();   // 跳到一半器材被搬走了
+    cat.dir = 1;
+    g.cd = myCoat === 'gym' ? rand(21600, 43200) : rand(43200, 86400);   // 這件下一次自己來練：健身貓 6～12 分鐘後，其他貓 12～24 分鐘後
+    if (k === 'bench') { cat.lift = false; cat.reps = Math.round(rand(5, 9)); setState('press', 99999); }
+    if (k === 'mill') { cat.fast = 0; setState('run', rand(600, 1000)); }
+    if (k === 'lat') { cat.strain = 0; cat.L = 17; setState('pull', rand(500, 800)); }
+  });
+}
 function leaveGear(k) {                                // 練完：從上來的那一頭跳下來
-  const g = GEAR[k];
   cat.lift = false;
-  hop(g.x + MOUNT[k].from, FLOOR, 6, 24, () => { cat.on = null; setState('lick', rand(90, 150)); });
+  hop(FURN[k].x + MOUNT[k].from, FLOOR, 6, 24, () => { cat.in = null; setState('lick', rand(90, 150)); });
 }
-function dropOff(k) {                                  // 器材被拖走、收起來：貓掉下來，器材回到沒人用的樣子
-  cat.on = null; cat.lift = false; cat.fast = 0;
-  if (GEAR.mill) GEAR.mill.speed = 1;
-  tumble();
-}
-function oops(vx) {                                    // 被甩出去、鬆手：往後飛，落地炸毛
-  cat.on = null; cat.fast = 0;
-  cat.vx = vx; cat.vy = -1.6; cat.oops = true;
+function oops(g, vx) {                                 // 被甩出去、鬆手：往後飛，落地炸毛
+  cat.in = null; cat.vx = vx; cat.vy = -1.6; g.flung = true;
   bang(cat.x, cat.y - 26);
   setState('fall', 999);
 }
@@ -303,7 +326,7 @@ function oops(vx) {                                    // 被甩出去、鬆手�
 const PLATE_P = [[-3, -2, 7, 5, 'Gp'], [-2, -3, 5, 7, 'Gp']];
 const PLATE_D = [[-1, -1, 3, 3, 'Gh'], [0, 0, 1, 1, 'O'], [-2, -2, 1, 1, 'Gl']];
 const RACK = [1, -24];                                 // 槓鈴掛在架子上時，槓片的中心（相對椅子）：跟手臂伸直時一樣高，舉起來不用跳
-function pressPose(L, strain) {                        // 躺在椅墊上、肚子朝上，兩隻前腳往上撐 L 格；strain：咬緊牙閉眼
+function pressPose(L, strain) {                        // 躺在椅墊上、肚子朝上，兩隻前腳往上撐 L 格；strain：咬緊牙閉眼（健身貓的頭帶見「健身貓」）
   const parts = [
     [-14, -3, 2, 2, 'F'], [-15, -1, 2, 4, 'F'],        // 尾巴從椅子尾巴垂下去
     [-10, -5, 15, 5, 'F'], [-9, -6, 12, 1, 'F'],       // 背貼著椅墊
@@ -315,7 +338,6 @@ function pressPose(L, strain) {                        // 躺在椅墊上、肚�
     [-7, -6, 9, 1, 'W'], [-6, -3, 1, 2, 'D'], [-3, -3, 1, 2, 'D'],
     [-10, -11, 2, 1, 'W'], [-6, -9, 2, 1, 'W'], [0, -5 - L, 2, 1, 'W'], [3, -5 - L, 2, 1, 'W'],
     [8, -6, 3, 2, 'W'], [9, -5, 1, 1, 'P'], [5, -1, 1, 1, 'P'], [13, -1, 1, 1, 'P'],
-    [5, -3, 9, 1, 'Hb'],                               // 頭帶（臉倒過來，額頭在下面）
   ];
   if (strain) det.push([6, -4, 2, 1, 'E'], [11, -4, 2, 1, 'E'], [9, -6, 1, 1, 'W'], [8, -7, 3, 1, 'O']);   // 閉眼、咬牙
   else det.push([7, -4, 1, 1, 'E'], [11, -4, 1, 1, 'E'], [7, -5, 1, 1, 'G'], [11, -5, 1, 1, 'G']);
@@ -333,8 +355,7 @@ function armLen() {                                    // 現在手臂往上撐�
   if (r < cat.reps * REP + 30) return 8;
   return Math.max(3, 8 - 5 * (r - cat.reps * REP - 30) / 20);
 }
-function stepPress() {
-  const g = GEAR.bench;
+function stepPress(g) {
   cat.x = g.x + MOUNT.bench.x; cat.y = g.y + MOUNT.bench.y; cat.dir = 1;
   const r = cat.t - PRESS_UP;
   if (cat.t === PRESS_UP) cat.lift = true;             // 從架子上拿下來
@@ -361,8 +382,7 @@ function drawBench(g) {                                // 臥推椅；槓鈴沒�
 
 /* ── 跑步機 ── */
 const MILL_SPEED = [0, 1, 1.6, 2.4];                   // 每一段速度：腳步多快（倍）
-function stepRun() {
-  const g = GEAR.mill;
+function stepRun(g) {
   cat.dir = 1; cat.y = g.y + MOUNT.mill.y;
   g.phase = (g.phase + MILL_SPEED[g.speed] * 0.7) % 30;   // 跑帶往後捲
   cat.energy -= 0.012 * g.speed;
@@ -371,8 +391,8 @@ function stepRun() {
   cat.fast = g.speed === 3 ? cat.fast + 1 : 0;
   if (cat.fast > 150) cat.x -= 0.3;                    // 最快撐不住：被往後擠
   else cat.x += (g.x + MOUNT.mill.x - cat.x) * 0.1;    // 慢下來就跑回原位
-  if (cat.x < g.x - 14) { g.speed = 1; oops(-1.4); return; }   // 從尾巴甩出去
-  if (cat.t > cat.dur && g.speed < 3) { g.speed = 1; note('treadmill'); leaveGear('mill'); }   // 跑夠了（最快的時候下不來）
+  if (cat.x < g.x - 14) return oops(g, -1.4);          // 從尾巴甩出去
+  if (cat.t > cat.dur && g.speed < 3) { note('treadmill'); leaveGear('mill'); }   // 跑夠了（最快的時候下不來）
 }
 function drawMill(g) {                                 // 跑步機：底座、跑帶（紋路往後捲）、前面的柱子、扶手、小螢幕顯示速度
   const x = Math.round(g.x), y = Math.round(g.y);
@@ -412,8 +432,7 @@ function pullPose(L, strain) {                         // 坐在椅墊上，一�
   return [parts, det];
 }
 const latBarTop = () => cat.state === 'pull' ? Math.round(cat.y) - 14 - Math.round(cat.L) : null;   // 拉著時握把頂端在哪（世界座標）
-function stepPull() {
-  const g = GEAR.lat;
+function stepPull(g) {
   cat.dir = 1; cat.x = g.x + MOUNT.lat.x;
   if (g.weight < 3) {                                  // 拉得動：從手伸直拉到下巴，再放回去
     cat.y = g.y + MOUNT.lat.y;
@@ -427,11 +446,11 @@ function stepPull() {
     return;
   }
   cat.L = 17;                                          // 太重了：拉不動，咬牙發抖……
-  cat.strain = (cat.strain || 0) + 1;
+  cat.strain++;
   if (cat.strain % 30 === 0) sweat(8, -21);
   const up = clamp((cat.strain - 90) / 8, 0, 4);       // ……然後整隻被拉離座椅
   cat.y = g.y + MOUNT.lat.y - up;
-  if (cat.strain > 140) { g.weight = 1; cat.strain = 0; oops(-0.8); }   // 鬆手掉下來
+  if (cat.strain > 140) { g.weight = 1; cat.strain = 0; oops(g, -0.8); }   // 鬆手掉下來
 }
 function drawLat(g) {                                  // 高拉背機：座椅、柱子、頂上的滑輪、鋼索和握把、配重片
   const x = Math.round(g.x), y = Math.round(g.y);
@@ -456,147 +475,67 @@ function sweat(dx, dy) {                               // 冒汗：一滴藍藍�
   grit(cat.x + cat.dir * dx, cat.y + dy, C.B, rand(-0.4, 0.4), rand(-0.9, -0.4), 30);
 }
 
-CHARS.gym = {
-  dress(pose, who) {                                   // 紅頭帶；舉著的槓鈴、拉著的握把畫在前面那層
-    const parts = pose[0].slice(), det = pose[1].slice();
-    const head = sideHead(parts);
-    if (head) {
-      const [hx, hy, , hh] = head;
-      let by = hy + 1;                                 // 綁在眼睛上面一格；頭比較扁（壓低、扒地、炸毛）的姿勢眼睛比較高，跟著往上
-      for (const [x, y, , , c] of pose[1])
-        if ((c === 'G' || c === 'E') && x >= hx && x < hx + 8 && y >= hy && y < hy + hh) by = Math.max(hy, Math.min(by, y - 1));
-      det.push([hx, by, 8, 1, 'Hb']);                  // 額頭一圈
-      parts.push([hx - 2, by, 2, 1, 'Hb'], [hx - 3, by + 1, 1, 1, 'Hb']);   // 腦後打結垂下來
+/* ── 三件共用：主程式的「DLC 家具」會叫這些（this 是那件器材，this.kind 是它的代號） ── */
+const DRAW = { bench: drawBench, mill: drawMill, lat: drawLat };
+const STEP = { bench: stepPress, mill: stepRun, lat: stepPull };
+const GEAR = {
+  draw() { DRAW[this.kind](this); },
+  hit(p) { return HIT[this.kind].some(([x0, y0, x1, y1]) => inBox(p, { x0: this.x + x0, y0: this.y + y0, x1: this.x + x1, y1: this.y + y1 })); },
+  click() {                                            // 點一下：叫貓過來練；正在練的話，跑步機加速、拉背機加重量
+    if (this.kind === 'mill' && using('mill')) this.speed = Math.min(3, this.speed + 1);
+    else if (this.kind === 'lat' && using('lat')) this.weight = Math.min(3, this.weight + 1);
+    else goGear(this.kind);
+    return true;
+  },
+  idle() { return !this.cd && cat.energy > 40 && goGear(this.kind); },   // 時間到了就自己去練
+  step() {
+    const k = this.kind;
+    this.cd = Math.max(0, this.cd - 1);
+    if (k === 'mill' && !using(k)) this.speed = 1;     // 沒人在跑：回到最慢
+    if (this.flung && !['fall', 'held'].includes(cat.state)) {   // 從這件被甩出去、鬆手掉下來：落地炸毛
+      this.flung = false;
+      if (cat.state === 'sit' && !cat.perch) { cat.dir = 1; setState('spook', rand(70, 100)); }
     }
-    if (who !== 'cat') return [parts, det];
-    if (cat.state === 'press' && cat.lift) {           // 槓片在兩隻前掌正上方
-      const y = -5 - Math.round(armLen()) - 3;
-      return [parts, det, [shift(PLATE_P, 2, y), shift(PLATE_D, 2, y)]];
-    }
-    if (cat.state === 'pull') {                        // 握把在前掌上面
-      const y = -14 - Math.round(cat.L);
-      return [parts, det, [[[4, y, 5, 2, 'Gp']], [[5, y, 3, 1, 'Gl']]]];
-    }
-    return [parts, det];
+    if (cat.in === k && cat.state !== USE[k] && cat.state !== 'hop') return tumble();   // 被叫去睡覺（安靜模式）之類的：已經不在練了，先掉下來
+    if (cat.state === GO[k]) {                         // 走到上來的那一頭，跳上去
+      if (!gearReady(k)) setState('sit', 60);
+      else if (goTo(this.x + MOUNT[k].from, 0.6)) mount(this);
+      else if (cat.t > cat.dur) setState('sit', 60);
+    } else if (using(k)) gearReady(k) ? STEP[k](this) : tumble();   // 練到一半器材被拖走了：貓掉下來
   },
   pose(f) {
-    if (WALK[cat.state]) return standPose(f);
-    if (cat.state === 'press') {
+    const k = this.kind;
+    if (cat.state === GO[k]) return standPose(f);
+    if (cat.state !== USE[k]) return null;
+    if (k === 'bench') {
       const L = Math.round(armLen()), r = cat.t - PRESS_UP;
       return pressPose(L, cat.lift && r >= 0 && r < cat.reps * REP && L <= 5);   // 推到最低、要往上推的時候最吃力
     }
-    if (cat.state === 'run') {
-      const g = GEAR.mill, k = MILL_SPEED[g ? g.speed : 1];
-      return standPose(Math.floor(cat.t * k / 9));     // 速度越快腳步越快
-    }
-    if (cat.state === 'pull') {
-      const g = GEAR.lat, L = Math.round(cat.L);
-      return pullPose(L, (g && g.weight >= 3) || L <= 7);   // 太重、或拉到最底下時咬牙
-    }
-    return null;
+    if (k === 'mill') return standPose(Math.floor(cat.t * MILL_SPEED[this.speed] / 9));   // 速度越快腳步越快
+    const L = Math.round(cat.L);
+    return pullPose(L, this.weight >= 3 || L <= 7);    // 太重、或拉到最底下時咬牙
   },
   box() {
-    const x = cat.x, y = cat.y;
-    if (cat.state === 'press') return { x0: x - 16, y0: y - 16, x1: x + 14, y1: y + 4 };
-    if (cat.state === 'run') return { x0: x - 13, y0: y - 17, x1: x + 9, y1: y + 1 };   // 窄一點：前面的螢幕要點得到
-    if (cat.state === 'pull') return { x0: x - 14, y0: y - 23, x1: x + 8, y1: y + 1 };
+    if (cat.state !== USE[this.kind]) return null;
+    const [x0, y0, x1, y1] = BOX[this.kind];
+    return { x0: cat.x + x0, y0: cat.y + y0, x1: cat.x + x1, y1: cat.y + y1 };
+  },
+  over() {                                             // 臥推：槓片在兩隻前掌正上方；拉背：握把在前掌上面
+    if (this.kind === 'bench' && cat.state === 'press' && cat.lift) {
+      const y = -5 - Math.round(armLen()) - 3;
+      return [shift(PLATE_P, 2, y), shift(PLATE_D, 2, y)];
+    }
+    if (this.kind === 'lat' && cat.state === 'pull') {
+      const y = -14 - Math.round(cat.L);
+      return [[[4, y, 5, 2, 'Gp']], [[5, y, 3, 1, 'Gl']]];
+    }
     return null;
   },
-  hitBack(p) {                                         // 器材：比家具後面才點得到
-    const b = GEAR.bench, m = GEAR.mill, l = GEAR.lat;
-    if (b && (inBox(p, { x0: b.x - 13, y0: b.y - 9, x1: b.x + 11, y1: b.y + 1 })
-      || inBox(p, { x0: b.x - 3, y0: b.y - 28, x1: b.x + 8, y1: b.y - 8 }))) return 'bench';
-    if (m && (inBox(p, { x0: m.x - 18, y0: m.y - 6, x1: m.x + 17, y1: m.y + 1 })
-      || inBox(p, { x0: m.x + 5, y0: m.y - 26, x1: m.x + 17, y1: m.y }))) return 'mill';
-    if (l && (inBox(p, { x0: l.x - 12, y0: l.y - 11, x1: l.x + 1, y1: l.y + 1 })
-      || inBox(p, { x0: l.x + 7, y0: l.y - 45, x1: l.x + 15, y1: l.y + 1 })
-      || inBox(p, { x0: l.x - 1, y0: l.y - 45, x1: l.x + 11, y1: l.y - 41 }))) return 'lat';
-    return null;
-  },
-  obj: kind => KINDS.includes(kind) ? GEAR[kind] || null : null,
-  click(kind) {                                        // 點一下器材：叫牠來練；正在練的話，跑步機加速、拉背機加重量
-    if (!KINDS.includes(kind)) return false;
-    const g = GEAR[kind];
-    if (kind === 'mill' && cat.state === 'run') g.speed = Math.min(3, g.speed + 1);
-    else if (kind === 'lat' && cat.state === 'pull') g.weight = Math.min(3, g.weight + 1);
-    else goGear(kind);
-    return true;
-  },
-  idle() {                                             // 時間到了：隨便挑一件擺好的器材去練
-    if (gymCD || cat.energy <= 40) return false;
-    const ks = KINDS.filter(gearReady).sort(() => Math.random() - 0.5);
-    for (const k of ks) if (goGear(k)) { gymCD = rand(10800, 21600); return true; }   // 下一次 3～6 分鐘後
-    return false;
-  },
-  off() {                                              // 換成別的毛色：器材收掉
-    for (const k of KINDS) if (GEAR[k]) { poof(GEAR[k].x, GEAR[k].y - 6); delete GEAR[k]; }
-    if (cat.on) { cat.on = null; cat.lift = false; cat.fast = 0; tumble(); }
-    else if (this.pose(0)) setState('sit', 60);
-    cat.oops = false;
-  },
-  step() {
-    for (const k of KINDS) if (!GEAR[k]) {             // 剛換成健身貓：把器材擺在附近的空地
-      const x = freeSpot(HALF[k]);
-      GEAR[k] = { x, y: FLOOR, vx: 0, vy: 0, held: false, speed: 1, phase: 0, weight: 1 };
-      poof(x, FLOOR - 6);
-    }
-    gymCD = Math.max(0, gymCD - 1);
-    if (cat.on && cat.state !== USE[cat.on] && cat.state !== 'hop') {   // 被拎起來、被叫去睡覺（安靜模式）之類的：已經不在器材上了
-      const k = cat.on;
-      cat.on = null; cat.lift = false; cat.fast = 0;
-      if (k === 'mill') GEAR.mill.speed = 1;
-      if (!['held', 'fall'].includes(cat.state)) tumble();   // 還留在器材高度的話，先掉下來
-    }
-    if (cat.oops && !['fall', 'held'].includes(cat.state)) {   // 被甩出去、鬆手掉下來：落地炸毛
-      cat.oops = false;
-      if (cat.state === 'sit') { cat.dir = 1; setState('spook', rand(70, 100)); }
-    }
-    const k = WALK[cat.state];
-    if (k) {                                           // 走到器材上來的那一頭，跳上去
-      const g = GEAR[k], m = MOUNT[k];
-      if (!gearReady(k)) setState('sit', 60);
-      else if (goTo(g.x + m.from, 0.6)) {
-        cat.on = k;
-        hop(g.x + m.x, g.y + m.y, m.h, 26, () => {
-          if (!gearReady(k) || Math.abs(cat.x - g.x - m.x) > 2) { cat.on = null; return tumble(); }   // 跳到一半器材被搬走了
-          cat.dir = 1;
-          if (k === 'bench') { cat.lift = false; cat.reps = Math.round(rand(5, 9)); setState('press', 99999); }
-          if (k === 'mill') { g.speed = 1; cat.fast = 0; setState('run', rand(600, 1000)); }
-          if (k === 'lat') { cat.strain = 0; cat.L = 17; setState('pull', rand(500, 800)); }
-        });
-      } else if (cat.t > cat.dur) setState('sit', 60);
-      return;
-    }
-    const u = cat.on && cat.state === USE[cat.on] ? cat.on : null;
-    if (!u) { cat.lift = false; return; }
-    if (!gearReady(u)) return dropOff(u);
-    if (u === 'bench') stepPress();
-    if (u === 'mill') stepRun();
-    if (u === 'lat') stepPull();
-  },
-  update() {
-    for (const k of KINDS) {
-      const g = GEAR[k];
-      if (g && settle(g, HALF[k], 0.8, TOP[k])) thud(g.x, HALF[k] - 1);
-    }
-  },
-  drawBack() {
-    if (GEAR.lat) drawLat(GEAR.lat);
-    if (GEAR.mill) drawMill(GEAR.mill);
-    if (GEAR.bench) drawBench(GEAR.bench);
-  },
-  resize(oldS) {
-    for (const k of KINDS) {
-      const g = GEAR[k];
-      if (!g) continue;
-      if (S !== oldS) g.x *= oldS / S;
-      g.x = clamp(g.x, HALF[k], W - HALF[k]);
-      if (!g.held) g.y = FLOOR;
-    }
-    if (cat.on && cat.state === USE[cat.on]) { const g = GEAR[cat.on], m = MOUNT[cat.on]; cat.x = g.x + m.x; cat.y = g.y + m.y; }
-  },
-  key(k) {                                             // b 臥推、m 跑步機、l 高拉背機（馬上去練）
-    const g = { b: 'bench', m: 'mill', l: 'lat' }[k];
-    if (g) { gymCD = 0; goGear(g); }
-  },
+  off() { this.flung = false; },                       // 收起來了：被甩出去的那一下不算了
+  key(c) { if (c === KEY[this.kind]) goGear(this.kind); },
 };
+// cd：還有幾格才想自己來練（第一次 1～4 分鐘後）；flung：貓從這件被甩出去，還沒落地
+const gear = (kind, name, desc, more) => ({ ...GEAR, kind, name, desc, cd: rand(3600, 14400), flung: false, ...more });
+FURN.bench = gear('bench', '臥推椅', '躺上去推槓鈴');
+FURN.mill = gear('mill', '跑步機', '原地跑步，點一下加速', { speed: 1, phase: 0 });   // speed：速度 1～3；phase：跑帶的紋路捲到哪
+FURN.lat = gear('lat', '高拉背機', '往下拉，點一下加重量', { weight: 1 });          // weight：重量 1～3
