@@ -1,0 +1,257 @@
+/* ═══ 毛球貓 DLC：掃地機器人 ═══
+   裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），重開毛球貓。
+   地上多一台掃地機器人，每一隻貓都會跟它玩（「家具」可以收起來）：
+     - 隔一陣子自己出來打掃（安靜模式時不會），撞到家具、畫面邊邊就倒退掉頭；卡在兩個東西中間會停下來閃橘燈。點一下出發、再點一下停。
+     - 地上的便便、貓砂盆翻倒灑出來的貓砂都會吸掉。偶爾會輾過便便，拖著走一路……
+     - 貓第一次看到它動會嚇到炸毛；習慣以後會撲上去搭便車，累了就趴在停著的機器人上睡覺。
+   要毛球貓 1.5.0 以上，商店版、GitHub 版都可以。
+
+   這個檔案是 JavaScript：毛球貓開機時讀進來跑（主程式 src/index.html 的「DLC」），主程式的東西都用得到；
+   家具要提供哪些函式，見主程式的「DLC 家具」。這裡的 const、function 只有這個檔案看得到，不會跟主程式、別的 DLC 撞名。
+   測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次）。貓閒著時按 r 出發／停下來、t 叫貓跳上去。 */
+if (typeof furnCall !== 'function') throw new Error('要毛球貓 1.5.0 以上');   // 1.4 的主程式還不會擺 DLC 的家具
+
+Object.assign(C, {
+  Vw: '#eef0f3', Vh: '#ffffff', Vs: '#c3c8d1', Vd: '#5d6474', Vk: '#2b2e38',   // 白色外殼、反光、側邊和保險桿、雷達和邊刷、輪子
+  Vn: '#7be08a', Vb: '#8fd3ff', Vo: '#ffa94d',          // 指示燈：打掃中綠燈、待機藍燈、被拎起來或卡住的橘燈
+});
+Object.assign(ZH, { toVac: '走去掃地機器人', ride: '搭掃地機器人' });
+Object.assign(RATE, { toVac: 9, ride: 20 });
+BUSY.push('ride');                                     // 搭到一半，丟毛球、換玩具都不理
+PETTABLE.push('ride');                                 // 搭著也能摸（摸完繼續搭）
+HALF.vacuum = 12; TOP.vacuum = 10;
+
+/* ═══ 掃地機器人（家具，每一隻貓都會搭） ═══
+   側面看是扁扁的一台：前面是保險桿和邊刷，後面凸起來的是雷達，上面一顆指示燈（綠：打掃中、藍：待機、橘：被拎起來或卡住）。
+   打掃（run）：每格走 RUN，碰到灑出來的貓砂、便便就吸掉；撞到東西先倒退一點、停一下再掉頭（back）。掃完一趟就停下來（park）。
+   貓在上面時 cat.in 是 'vacuum'：搭著（ride）跟著走，被摸、睡著也還在上面；機器人被拖走、收起來，貓就掉下來。 */
+const RUN = 0.3;                                       // 打掃時每格走多遠
+const RIDE_Y = -7;                                     // 貓搭在上面時腳底在哪（相對機器人的底邊）
+const SMEAR = 0.2;                                     // 碰到便便時輾過去、而不是吸掉的機率
+const CALM = ['sit', 'lick', 'stare', 'walk', 'rest', 'loaf'];   // 閒著：看得到機器人，會被它嚇到、會想上去
+const STILL = ['sit', 'lick', 'stare', 'rest', 'loaf', 'sleep', 'flop', 'beg', 'drool', 'dream', 'pet', 'eat', 'stink'];   // 待在原地：機器人撞到就掉頭
+const ON_TOP = ['ride', 'pet', 'sleep'];               // 在機器人上面能做的事
+let fear = true;                                       // 還沒看過它動：第一次看到會嚇到炸毛（每次開機重來）
+let loaf = false;                                      // 搭的時候趴著，不然是坐著
+
+// 機身：(0, 0) 是底邊正中間，面向右。輪子另外加（被拎起來時會掉下來一格）
+const BODY = [
+  [-9, -7, 18, 1, 'Vw'], [-11, -6, 22, 4, 'Vw'], [-10, -2, 20, 1, 'Vs'],   // 上蓋圓圓的邊、機身、底盤
+  [-8, -9, 6, 2, 'Vd'],                                // 雷達
+];
+const TRIM = [
+  [-11, -4, 19, 1, 'Vs'],                              // 側邊一圈接縫
+  [8, -6, 3, 4, 'Vs'], [8, -5, 3, 1, 'Vd'],            // 保險桿、感應窗
+  [-6, -7, 6, 1, 'Vh'],                                // 上蓋的反光
+];
+const DIRT = [[-7, -3, 1, 1, 'Pd'], [-2, -2, 2, 1, 'Pb'], [5, -5, 1, 1, 'Pb'], [9, -3, 1, 1, 'Pd']];   // 輾過便便：沾得到處都是
+
+const dragged = g => g.held && (!drag || drag.obj !== g || drag.moved >= 1.5);   // 真的被拖走了（按下去還沒怎麼動，可能只是點一下）
+const ready = g => FURN.vacuum === g && g.on && !dragged(g) && g.y >= FLOOR;     // 好好擺在地上：貓可以上去、待在上面
+const rolling = g => g.on && !g.held && g.y >= FLOOR;  // 輪子著地、沒被按住：可以走
+const sneak = g => g.mode !== 'park' && Math.abs(g.x - cat.x) < 60;   // 機器人在動、離得近：壓低身體偷偷靠近
+const ahead = (g, x, half) => { const d = (x - g.x) * g.dir; return d > 0 && d <= HALF.vacuum + half; };   // 半寬 half 的東西擋在正前方了嗎
+
+/* ── 機器人自己：出發、停下來、往前走、撞到東西掉頭、吸地上的東西 ── */
+function start(g) {                                    // 出發打掃一趟（40～70 秒）
+  Object.assign(g, { mode: 'run', t: 0, left: rand(2400, 4200), went: 0, jam: 0, stuck: false });
+  note('vacuum_runs');
+  if (cat.in === 'vacuum' && fear && cat.state !== 'hop') {   // 在上面睡得好好的，它突然動了！
+    fear = false;
+    bang(cat.x + cat.dir * 2, cat.y - 34);
+    hopOff(g, () => setState('spook', rand(70, 100)));
+  }
+}
+function park(g, stuck = false) {                      // 停下來；下一趟 6～12 分鐘後
+  Object.assign(g, { mode: 'park', t: 0, stuck, cd: rand(21600, 43200) });
+}
+function drive(g) {                                    // 打掃中：往前走；撞到東西先倒退一點、停一下，再掉頭
+  if (--g.left <= 0) return park(g);
+  if (g.mode === 'back') {
+    if (g.t < 16) g.x -= g.dir * 0.15;
+    else if (g.t >= 40) Object.assign(g, { mode: 'run', t: 0, dir: -g.dir, went: 0 });
+    return;
+  }
+  g.x += g.dir * RUN; g.went += RUN;
+  if (g.dirt > 1200 && Math.abs(g.x - g.mark) >= 2) { g.trail.push({ x: g.x - g.dir * 2, life: 1800 }); g.mark = g.x; }   // 剛輾過便便：輪子拖出一條
+  sweep(g);
+  if (blocked(g)) bump(g);
+}
+function bump(g) {                                     // 撞到了：倒退掉頭。剛掉頭沒走多遠又撞到、連三次，就是卡住了
+  g.jam = g.went < 6 ? g.jam + 1 : 0;
+  if (g.jam >= 3) return park(g, true);
+  Object.assign(g, { mode: 'back', t: 0 });
+}
+function blocked(g) {                                  // 前面擋著東西嗎：畫面邊邊、家具、待在原地的貓。毛球就頂著滾走
+  if (g.dir < 0 ? g.x <= HALF.vacuum + 0.5 : g.x >= W - HALF.vacuum - 0.5) return true;
+  for (const [k, o] of Object.entries(FURN)) if (o !== g && o.on && !o.held && o.y >= FLOOR && ahead(g, o.x, HALF[k])) return true;
+  if (toy === 'ball' && !ball.held && ball.y >= FLOOR - ball.r - 1 && ahead(g, ball.x, ball.r) && ball.vx * g.dir < 1) ball.vx = g.dir * 1.2;
+  if (!g.wait && !cat.in && !cat.perch && cat.y >= FLOOR && STILL.includes(cat.state) && ahead(g, cat.x, 9)) return meetCat(g);
+  return false;
+}
+function sweep(g) {                                    // 吸掉前半台底下的東西：灑出來的貓砂、便便（緊貼著家具的也吸得到）
+  const under = x => { const d = (x - g.x) * g.dir; return d >= 0 && d <= HALF.vacuum; };
+  if (litter.tipped) litter.spill = litter.spill.filter(s => !under(s.x));
+  for (let i = poos.length - 1; i >= 0; i--) {
+    const q = poos[i];
+    if (q.held || q.y < FLOOR || !under(q.x)) continue;
+    poos.splice(i, 1);
+    if (Math.random() < SMEAR) smear(g); else gulp(g, q);
+  }
+}
+function gulp(g, q) {                                  // 吸進去了：亮晶晶
+  for (let i = 0; i < 3; i++) grit(q.x, FLOOR - 2, C.Pb, -g.dir * rand(0.3, 0.7), rand(-0.6, -0.2), 12);
+  sparkle(g.x, g.y - 16);
+  note('vacuum_poos');
+}
+function smear(g) {                                    // 輾過去了……：機器人沾得到處都是，接下來拖著走一路
+  g.dirt = 2400; g.mark = g.x;
+  note('vacuum_smears');
+  for (let i = 0; i < 3; i++) stink(g.x + rand(-6, 6), g.y - 10);
+  if (cat.in === 'vacuum') { if (cat.state !== 'hop') hopOff(g, () => disgust(g)); }   // 搭在上面的貓：嫌臭跳下來
+  else if (!cat.perch && cat.y >= FLOOR && CALM.includes(cat.state) && Math.abs(g.x - cat.x) < 70) disgust(g);
+}
+
+/* ── 貓：第一次看到嚇一跳、被撞到、撲上去搭、搭著、跳下來 ── */
+function scare(g) {                                    // 第一次看到它動：嚇到炸毛（主程式的 spook：弓背往後跳，跳完多半暴衝跑走）
+  fear = false;
+  cat.dir = Math.sign(g.x - cat.x) || cat.dir;
+  bang(cat.x + cat.dir * 2, cat.y - 34);
+  setState('spook', rand(70, 100));
+}
+function disgust(g) {                                  // 好臭！皺著臉往後縮，再對著地板扒呀扒（主程式的 stink → bury）
+  cat.poo = null;
+  cat.dir = Math.sign(g.x - cat.x) || cat.dir;
+  setState('stink', 60);
+  for (let i = 0; i < 3; i++) stink(cat.x + cat.dir * rand(8, 12), cat.y - rand(10, 14));
+}
+// 撞到待在原地的貓：沒看過它動的嚇到炸毛；睡著的被吵醒；閒著的有時候順勢跳上去搭（機器人就不用掉頭了）
+function meetCat(g) {
+  g.wait = 180;                                        // 3 秒內不再管貓
+  if (fear) { scare(g); return true; }
+  if (cat.state === 'sleep') {
+    bang(cat.x, cat.y - 24);
+    cat.dir = Math.sign(g.x - cat.x) || cat.dir;
+    setState('sit', rand(60, 120));
+    return true;
+  }
+  if (!CALM.includes(cat.state)) return true;
+  if (!quiet && cat.energy > 30 && !g.dirt && Math.random() < 0.5) { mount(g); return false; }
+  cat.dir = Math.sign(g.x - cat.x) || cat.dir;
+  return true;
+}
+function watch(g) {                                    // 打掃中：附近閒著的貓第一次看到會嚇一跳，之後坐著盯著它看
+  if (cat.in || cat.perch || cat.y < FLOOR || quiet || !CALM.includes(cat.state) || Math.abs(g.x - cat.x) > 90) return;
+  if (fear) scare(g);
+  else if (cat.state === 'sit') cat.dir = Math.sign(g.x - cat.x) || cat.dir;
+}
+function goVac() { setState('toVac', trek(0.6)); return true; }
+function chase(g) {                                    // 走過去；機器人在動的話，近了就壓低身體偷偷靠近，再撲上去
+  if (!ready(g) || g.dirt || g.stuck) return setState('sit', 60);
+  const d = g.x - cat.x;
+  if (Math.abs(d) < 24) { if (g.mode !== 'back') mount(g); return; }   // 正在倒退掉頭：等它轉好
+  cat.dir = Math.sign(d);
+  cat.x += cat.dir * Math.min(sneak(g) ? 0.5 : 0.6, Math.abs(d));
+  if (cat.t > cat.dur) setState('sit', 60);
+}
+function mount(g) {                                    // 跳上去：機器人在動的話，瞄準跳完那一刻它會在哪
+  const dur = 26;
+  cat.in = 'vacuum';
+  hop(g.x + (g.mode === 'run' ? g.dir * RUN * dur : 0), g.y + RIDE_Y, 10, dur, () => {
+    if (!ready(g) || Math.abs(cat.x - g.x) > 6) return tumble();   // 沒跳準、機器人被搬走了：掉下來
+    loaf = Math.random() < 0.3;
+    note('vacuum_rides');
+    setState('ride', rand(1200, 2700));                // 搭個 20～45 秒
+  });
+}
+function carry(g) {                                    // 貓在上面：跟著走。機器人被拖走、收起來，或貓被叫去做別的，就掉下來
+  if (cat.state === 'sit') setState('ride', rand(600, 1200));   // 摸完、睡醒：繼續搭
+  if (!ready(g) || !ON_TOP.includes(cat.state)) return tumble();
+  cat.x = g.x; cat.y = g.y + RIDE_Y;
+  if (cat.state === 'ride') ride(g);
+}
+function ride(g) {                                     // 搭著：面向前進的方向；搭夠了、停下來了就跳下來，累了就趴著睡
+  cat.dir = g.dir;
+  if (wantTreat()) return hopOff(g, goTreat);          // 有貓條！
+  if (cat.t < cat.dur && !(g.mode === 'park' && g.t > 90 && cat.t > 180)) return;
+  if (g.mode === 'park' && cat.energy < 60 && !g.dirt) setState('sleep', rand(900, 1800));
+  else hopOff(g);
+}
+function hopOff(g, then) {                             // 跳下來：機器人在動就往後跳，才不會擋在它前面
+  const s = g.mode === 'park' ? cat.dir : -g.dir;
+  hop(g.x + s * 22, FLOOR, 6, 24, () => { cat.in = null; then ? then() : setState('lick', rand(90, 150)); });
+}
+
+/* ── 主程式的「DLC 家具」會叫這些（this 就是這台機器人） ── */
+FURN.vacuum = {
+  name: '掃地機器人', desc: '自己出來打掃，點一下開關',
+  // mode：park 停著、run 打掃中、back 撞到東西正在倒退掉頭；dir：往哪邊走；t：這個 mode 過了幾格；cd：還有幾格自己出發（第一次 1～3 分鐘後）
+  mode: 'park', dir: Math.random() < 0.5 ? 1 : -1, t: 0, cd: rand(3600, 10800),
+  // left：這一趟還要掃幾格；went：掉頭後走了多遠；jam：連續剛掉頭就撞到幾次；stuck：卡住了（閃橘燈，等下一趟、點一下或搬開）
+  left: 0, went: 0, jam: 0, stuck: false,
+  // wait：剛撞過貓，幾格內不再管貓；dirt：輾過便便還髒幾格；mark：上一個痕跡留在哪；trail：地上拖出來的痕跡 { x, life }
+  wait: 0, dirt: 0, mark: 0, trail: [],
+  draw() {
+    const g = this;
+    for (const m of g.trail) {                         // 地上拖出來的痕跡，慢慢淡掉
+      ctx.globalAlpha = Math.min(1, m.life / 600);
+      ctx.fillStyle = Math.round(m.x) % 3 ? C.Pd : C.Pb;
+      ctx.fillRect(Math.round(m.x), FLOOR - 1, 2, 1);
+    }
+    ctx.globalAlpha = 1;
+    const lift = dragged(g) || g.y < FLOOR;            // 被拎起來、還沒落地：輪子掉下來一格
+    const spin = g.mode !== 'park' && !lift;           // 輪子、邊刷在轉
+    const led = lift ? 'Vo' : g.stuck ? (g.t % 30 < 15 ? 'Vo' : 'Vs') : g.mode === 'park' ? 'Vb' : g.t % 60 < 45 ? 'Vn' : 'Vs';
+    const det = [...TRIM, [3, -7, 1, 1, led]];
+    if (spin) {
+      const k = Math.floor(g.t / 6) % 4;
+      det.push([g.mode === 'back' ? -3 + k : -k, -1, 1, 1, 'Vd']);   // 輪子上的一點跟著轉
+      det.push(...(Math.floor(g.t / 4) % 2 ? [[11, -1, 2, 1, 'Vd']] : [[11, -1, 1, 1, 'Vd'], [12, -2, 1, 1, 'Vd']]));   // 邊刷
+    } else det.push([11, -1, 1, 1, 'Vd']);
+    if (g.dirt) det.push(...DIRT);
+    drawRects(Math.round(g.x), Math.round(g.y), [...BODY, [-3, lift ? 0 : -1, 4, 1, 'Vk']], det, g.dir);
+  },
+  hit(p) { return inBox(p, { x0: this.x - 12, y0: this.y - 10, x1: this.x + 12, y1: this.y + 1 }); },
+  click() {                                            // 點一下：停著就出發，在掃就停下來
+    if (this.mode === 'park') start(this); else park(this);
+    return true;
+  },
+  idle() {                                             // 貓閒著：打掃中撲上去搭一程；停著的時候，累了就上去趴著睡
+    const g = this;
+    if (quiet || cat.perch || cat.in || cat.energy < 30 || g.dirt || g.stuck || !ready(g)) return false;
+    if (g.mode === 'park') return cat.energy < 60 && Math.random() < 0.15 && goVac();
+    return !fear && Math.random() < 0.35 && goVac();
+  },
+  step() {
+    const g = this;
+    g.t++;
+    g.cd = Math.max(0, g.cd - 1); g.wait = Math.max(0, g.wait - 1); g.dirt = Math.max(0, g.dirt - 1);
+    for (let i = g.trail.length - 1; i >= 0; i--) if (--g.trail[i].life <= 0) g.trail.splice(i, 1);
+    if (dragged(g)) { g.stuck = false; g.jam = 0; }    // 被搬開了：不卡了
+    if (quiet && g.mode !== 'park') park(g);           // 安靜模式：停下來
+    else if (g.mode === 'park' && !g.cd && !quiet && rolling(g)) start(g);   // 時間到了：自己出發
+    if (g.mode !== 'park' && rolling(g)) drive(g);
+    if (g.dirt && g.t % 40 === 0) stink(g.x + rand(-6, 6), g.y - 10);
+    if (cat.in === 'vacuum') { if (cat.state !== 'hop') carry(g); }   // 跳上跳下的時候交給主程式的 hop
+    else if (cat.state === 'toVac') chase(g);
+    else if (g.mode !== 'park' && rolling(g)) watch(g);
+  },
+  pose(f) {
+    if (cat.state === 'toVac') return sneak(this) ? crouchPose(f, true) : standPose(f);
+    if (cat.state === 'ride') return loaf ? loafPose(f, false) : sitPose(f, 'sit');
+    return null;
+  },
+  box() {
+    if (cat.state !== 'ride') return null;
+    const x = cat.x, y = cat.y;
+    return loaf ? { x0: x - 13, y0: y - 17, x1: x + 13, y1: y + 1 } : { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+  },
+  off() {                                              // 收起來了：停下來、擦乾淨（貓在上面的話，主程式會讓牠掉下來）
+    park(this);
+    Object.assign(this, { stuck: false, dirt: 0, trail: [] });
+  },
+  key(k) {                                             // 網頁版測試：r 出發／停下來、t 叫貓跳上去
+    if (k === 'r') this.click();
+    if (k === 't' && ready(this)) { fear = false; goVac(); }
+  },
+};
