@@ -1,18 +1,21 @@
 /* ═══ 毛球貓 DLC：萬聖節 ═══
    裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），重開毛球貓。
-   「毛色」多了「黑貓」，一年到頭都在。萬聖節期間（10 月 1 日到 11 月 1 日）再多這些：
-     - 黑貓戴上巫婆帽。
+   這些一年到頭都在：
+     - 「毛色」多了「黑貓」。
+     - 「配件」多了「萬聖節帽子」，每一隻貓都戴（狀態視窗「配件」可以拿掉）。不同毛色戴不一樣的：
+       黑貓巫婆帽、藍灰南瓜帽、橘貓蝙蝠髮夾、黑白賓士惡魔角；別的 DLC 的毛色也會配一頂。隔壁來的客人也戴（那邊也要裝這個 DLC）。
+   萬聖節期間（10 月 1 日到 11 月 1 日）再多這些：
      - 地上多一顆南瓜燈（「家具」可以收起來），每一隻貓都會躲進去，從刻出來的眼睛往外偷看，眼睛跟著游標轉。
        摸摸南瓜或點一下，牠就頂開蓋子蹦出來嚇你；把貓丟進去，牠就躲在裡面。
      - 點一下南瓜燈：不給糖就搗蛋。裡面有貓是搗蛋（蹦出來嚇你），沒有貓就給糖（掉出一顆糖果，貓會跑過去撥著玩）。
    是不是萬聖節，打開毛球貓的時候看電腦的日期決定；開著過了 11 月 1 日，要重開才會收起來。
-   要毛球貓 1.5.0 以上，商店版、GitHub 版都可以。
+   要毛球貓 1.6.0 以上，商店版、GitHub 版都可以。
 
    這個檔案是 JavaScript：毛球貓開機時讀進來跑（主程式 src/index.html 的「DLC」），主程式的東西都用得到；
-   角色、家具要提供哪些函式，見主程式的「角色」「DLC 家具」。這裡的 const、function 只有這個檔案看得到，不會跟主程式、別的 DLC 撞名。
-   測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次），按 c 換到黑貓。
+   配件、家具要提供哪些函式，見主程式的「配件」「DLC 家具」。這裡的 const、function 只有這個檔案看得到，不會跟主程式、別的 DLC 撞名。
+   測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次），按 c 換毛色看每一頂帽子、w 拿掉或戴上。
    閒著時按 j 躲進南瓜燈、k 從南瓜燈掉一顆糖果。不是萬聖節也想測試，把下面的 FROM、TO 改成包含今天。 */
-if (typeof furnCall !== 'function') throw new Error('要毛球貓 1.5.0 以上');   // 1.4 的主程式還不會擺 DLC 的家具
+if (typeof WEAR !== 'object') throw new Error('要毛球貓 1.6.0 以上');   // 1.5 的主程式還不能加配件
 
 const FROM = [10, 1], TO = [11, 1];                    // 萬聖節期間：[月, 日]，頭尾兩天都算。想整年都有就改成 [1, 1]、[12, 31]
 function inSeason(d = new Date()) {
@@ -23,53 +26,57 @@ const SEASON = inSeason();
 
 Object.assign(C, {
   Mh: '#5b3b8c', Ml: '#7f5cba', Mb: '#ff9b3d',          // 巫婆帽：帽子、帽子的亮面、帽帶
+  Xr: '#d8343c', Xl: '#ff7a6b', Xk: '#2e2a35',          // 惡魔角：角、角的亮面、髮箍
+  Xb: '#3b2f4f', Xy: '#ffd34d',                         // 蝙蝠髮夾：蝙蝠、眼睛
   Uo: '#f08a24', Ul: '#ffb453', Ud: '#c2621b', Ui: '#6e3210',   // 南瓜：南瓜皮、亮面、紋路和陰影、蓋子和洞的切口
   Us: '#6f8f3a', Ut: '#4d6628',                         // 南瓜蒂
   Uy: '#ffd34d', Uw: '#fff1a6', Uf: '#ffae2b', Uk: '#2e1a12',   // 刻出來的洞：燭光、最亮的地方、燭光暗一點的時候、貓躲在裡面擋住光
   Qa: '#ff7a3d', Qb: '#ffd08a', Qc: '#a56ae6', Qd: '#dcc6ff', Qe: '#45bf66', Qf: '#bdf0b3',   // 糖果：橘、紫、綠三種，各有糖紙
 });
 Object.assign(COATS, {
-  witch: { F: '#35343f', D: '#2a2933', W: '#3f3e4b', G: '#ffc83d', P: '#d98494' },   // 黑貓：一身黑、琥珀色的眼睛；萬聖節的巫婆帽見「黑貓」
+  witch: { F: '#35343f', D: '#2a2933', W: '#3f3e4b', G: '#ffc83d', P: '#d98494' },   // 黑貓：一身黑、琥珀色的眼睛；戴巫婆帽（見「萬聖節帽子」）
 });
 Object.assign(COAT_NAMES, { witch: '黑貓' });
 
-/* ═══ 黑貓：萬聖節戴巫婆帽（毛色選「黑貓」就是牠） ═══
-   外觀：沿用每個姿勢，頭上加一頂帽尖往後彎的巫婆帽（dress）。側臉的姿勢照頭的位置戴；正面的臉（被拎起來、蹦出來嚇你）戴正面的帽子；
-   翻肚躺著時帽子掉在臉旁邊的地上。躲在紙箱裡時帽子露在箱口，探頭就跟著頂起來（drawFront）；躲在南瓜燈裡時帽子掛在南瓜蒂上。
-   南瓜燈每一隻貓都會躲，黑貓比較常去。 */
-// 帽子：(0, 0) 是頭的左上角。側面面向右，帽尖往後（左邊）彎；正面的帽尖往右歪
-const HAT_SIDE = [
-  [[-1, -3, 10, 1, 'Mh'], [1, -4, 6, 1, 'Mh'], [2, -5, 4, 1, 'Mh'], [2, -6, 3, 1, 'Mh'], [1, -7, 3, 1, 'Mh'], [0, -8, 2, 1, 'Mh']],
-  [[1, -4, 6, 1, 'Mb'], [4, -5, 1, 1, 'Ml'], [4, -6, 1, 1, 'Ml'], [3, -7, 1, 1, 'Ml']],
-];
-const HAT_FRONT = [
-  [[-1, -3, 11, 1, 'Mh'], [2, -4, 5, 1, 'Mh'], [3, -5, 3, 1, 'Mh'], [3, -6, 3, 1, 'Mh'], [4, -7, 2, 1, 'Mh'], [5, -8, 2, 1, 'Mh']],
-  [[2, -4, 5, 1, 'Mb'], [5, -5, 1, 1, 'Ml'], [5, -6, 1, 1, 'Ml']],
-];
-const hat = ([p, d], x, y) => [shift(p, x, y), shift(d, x, y)];
-const frontHead = parts => parts.find(([, , w, h, c]) => c === 'F' && w === 9 && h === 8);   // 正面的臉：被拎起來、從紙箱蹦出來
-
-const WITCH = {
-  dress(pose, who) {
-    const parts = pose[0].slice(), det = pose[1].slice();
-    let worn = null;                                   // 躲在南瓜燈裡的姿勢是空的，找不到頭：帽子由南瓜燈掛在蒂上
-    if (who === 'cat' && onBack()) worn = hat(HAT_SIDE, 17, 2);   // 翻肚躺著：帽子掉在臉旁邊的地上
-    else {
-      const side = sideHead(parts), front = !side && frontHead(parts);
-      if (side) worn = hat(HAT_SIDE, side[0], side[1]);
-      else if (front) worn = hat(HAT_FRONT, front[0], front[1]);
-    }
-    if (worn) { parts.push(...worn[0]); det.push(...worn[1]); }
-    return [parts, det];
+/* ═══ 萬聖節帽子（配件，每一隻貓都戴，一年到頭都在） ═══
+   不同毛色戴不一樣的（HAT_OF）：黑貓巫婆帽、藍灰南瓜帽、橘貓蝙蝠髮夾、黑白賓士惡魔角；沒寫到的毛色（以後別的 DLC 加的）照代號挑一頂，同一個毛色每次都一樣。
+   怎麼戴由主程式決定（見主程式的「配件」）：側臉戴 side、正面的臉（被拎起來、蹦出來嚇你、躲在紙箱裡探頭）戴 front，翻肚躺著時掉在地上。
+   躲在南瓜燈裡時，帽子掛在南瓜蒂上（見 lanternRects）。 */
+// 每一頂：side 戴在側臉上，(0, 0) 是頭的左上角，面向右；front 戴在正面的臉上，(0, 0) 是臉的左上角。各是 [parts, det]
+const HATS = {
+  witch: {                                             // 巫婆帽：側面的帽尖往後（左邊）彎，正面的往右歪
+    side: [[[-1, -3, 10, 1, 'Mh'], [1, -4, 6, 1, 'Mh'], [2, -5, 4, 1, 'Mh'], [2, -6, 3, 1, 'Mh'], [1, -7, 3, 1, 'Mh'], [0, -8, 2, 1, 'Mh']],
+      [[1, -4, 6, 1, 'Mb'], [4, -5, 1, 1, 'Ml'], [4, -6, 1, 1, 'Ml'], [3, -7, 1, 1, 'Ml']]],
+    front: [[[-1, -3, 11, 1, 'Mh'], [2, -4, 5, 1, 'Mh'], [3, -5, 3, 1, 'Mh'], [3, -6, 3, 1, 'Mh'], [4, -7, 2, 1, 'Mh'], [5, -8, 2, 1, 'Mh']],
+      [[2, -4, 5, 1, 'Mb'], [5, -5, 1, 1, 'Ml'], [5, -6, 1, 1, 'Ml']]],
   },
-  drawFront() {                                        // 躲在紙箱裡：主程式的 drawPeek 只畫耳朵和眼睛，帽子補在箱口，探頭時跟著頂起來
-    if (cat.state !== 'hide' || cat.in !== 'box' || !box.on) return;
-    const k = cat.t % 300, nap = quiet || cat.energy < 30;   // 探頭的時機照 drawPeek 算：臉在 (箱子, 箱底 + 8 - up)
-    const up = nap ? 0 : k < 200 ? 0 : k < 208 ? k - 200 : k < 280 ? 8 : Math.max(0, 288 - k);
-    const [p, d] = hat(HAT_FRONT, -4, -19);
-    drawRects(boxX(), Math.round(box.y) + 8 - up, p, d);
+  pumpkin: {                                           // 南瓜帽：一顆小南瓜坐在兩隻耳朵中間，蒂頭旁邊一片葉子
+    side: [[[0, -5, 7, 3, 'Uo'], [1, -6, 5, 1, 'Uo'], [3, -8, 1, 2, 'Us'], [4, -8, 1, 1, 'Us']],
+      [[2, -6, 1, 4, 'Ud'], [4, -6, 1, 4, 'Ud'], [1, -5, 1, 1, 'Ul'], [4, -8, 1, 1, 'Ut']]],
+    front: [[[1, -5, 7, 3, 'Uo'], [2, -6, 5, 1, 'Uo'], [4, -8, 1, 2, 'Us'], [5, -8, 1, 1, 'Us']],
+      [[3, -6, 1, 4, 'Ud'], [5, -6, 1, 4, 'Ud'], [2, -5, 1, 1, 'Ul'], [5, -8, 1, 1, 'Ut']]],
+  },
+  devil: {                                             // 惡魔角：深色髮箍上兩支紅色小角
+    side: [[[0, -3, 8, 1, 'Xk'], [1, -5, 2, 2, 'Xr'], [1, -6, 1, 1, 'Xr'], [5, -5, 2, 2, 'Xr'], [6, -6, 1, 1, 'Xr']],
+      [[2, -5, 1, 1, 'Xl'], [6, -5, 1, 1, 'Xl']]],
+    front: [[[0, -3, 9, 1, 'Xk'], [1, -5, 2, 2, 'Xr'], [1, -6, 1, 1, 'Xr'], [6, -5, 2, 2, 'Xr'], [7, -6, 1, 1, 'Xr']],
+      [[2, -5, 1, 1, 'Xl'], [6, -5, 1, 1, 'Xl']]],
+  },
+  bat: {                                               // 蝙蝠髮夾：張開翅膀的小蝙蝠，黃眼睛
+    side: [[[0, -6, 1, 1, 'Xb'], [6, -6, 1, 1, 'Xb'], [0, -5, 7, 1, 'Xb'], [1, -4, 5, 1, 'Xb'], [3, -3, 1, 1, 'Xb']],
+      [[2, -5, 1, 1, 'Xy'], [4, -5, 1, 1, 'Xy']]],
+    front: [[[1, -6, 1, 1, 'Xb'], [7, -6, 1, 1, 'Xb'], [1, -5, 7, 1, 'Xb'], [2, -4, 5, 1, 'Xb'], [4, -3, 1, 1, 'Xb']],
+      [[3, -5, 1, 1, 'Xy'], [5, -5, 1, 1, 'Xy']]],
   },
 };
+const HAT_OF = { witch: 'witch', gray: 'pumpkin', orange: 'bat', tuxedo: 'devil', boss: 'devil', gym: 'pumpkin' };
+const HAT_ORDER = ['pumpkin', 'bat', 'devil', 'witch'];   // 沒寫到的毛色：照代號算一個數字挑
+function hatFor(coat) {
+  if (HAT_OF[coat]) return HATS[HAT_OF[coat]];
+  let h = 0;
+  for (const c of String(coat)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return HATS[HAT_ORDER[h % HAT_ORDER.length]];
+}
 
 /* ═══ 南瓜燈（家具，每一隻貓都會躲） ═══
    一顆刻了臉的大南瓜，裡面點著電子蠟燭（貓躲進去也不會燙到），眼睛、嘴巴透出一閃一閃的燭光。
@@ -135,7 +142,7 @@ const roomy = (g, s, d) => g.x + s * d >= 12 && g.x + s * d <= W - 12 ? s : -s; 
    前面那層不畫蒂頭和蓋子：蓋子被貓頂開了，畫在貓後面（draw 那一次），才不會疊在貓肚子上 */
 function lanternRects(g, front = false) {
   const lift = lidLift(g), lurking = inside() && ['lurk', 'lanternBoo'].includes(cat.state);
-  const hatOn = myCoat === 'witch' && inside() && cat.state === 'lurk';   // 黑貓躲進去了：巫婆帽掛在南瓜蒂上（蓋住蒂頭）
+  const hatOn = inside() && cat.state === 'lurk' && hatOf(myCoat, worn());   // 戴著配件躲進去了：帽子掛在南瓜蒂上（蓋住蒂頭）
   const parts = [...BODY], det = [...SKIN];
   const top = !front || cat.state === 'lurk';          // 要不要畫蒂頭、蓋子
   if (top && !hatOn) { parts.push(...shift(STEM, 0, -lift)); det.push(...shift(STEM_D, 0, -lift)); }
@@ -155,7 +162,7 @@ function lanternRects(g, front = false) {
     if (!dim) for (const [x, y, w, h] of GLOW) det.push([x, y, w, h, 'Uw']);
   }
   det.push(...TEETH);
-  if (hatOn) { const [p, d] = hat(HAT_SIDE, -4, -14 - lift); parts.push(...p); det.push(...d); }
+  if (hatOn) { parts.push(...shift(hatOn.side[0], -4, -14 - lift)); det.push(...shift(hatOn.side[1], -4, -14 - lift)); }
   return [parts, det];
 }
 function flicker(g) {                                  // 每 5 格決定一次要不要暗一下：用格數算，不用亂數（畫面不能動到遊戲的亂數）
@@ -409,9 +416,9 @@ const PUMPKIN = {
   },
 };
 
-/* ═══ 登記：萬聖節期間才有巫婆帽和南瓜燈 ═══ */
+/* ═══ 登記：帽子一年到頭都在，萬聖節期間才有南瓜燈 ═══ */
+WEAR.halloween = { name: '萬聖節帽子', hat: hatFor };
 if (SEASON) {
-  CHARS.witch = WITCH;
   Object.assign(ZH, { toLantern: '溜進南瓜燈', lurk: '躲在南瓜燈裡', lanternBoo: '從南瓜燈蹦出來嚇你', toCandy: '去撥糖果', batCandy: '撥糖果' });
   Object.assign(RATE, { toLantern: 12, lurk: 10, lanternBoo: 99, toCandy: 9, batCandy: 99 });   // 99：動畫自己算，不靠 frame
   BUSY.push('lurk', 'lanternBoo');                     // 躲著、蹦出來的時候，丟毛球、換玩具都不理

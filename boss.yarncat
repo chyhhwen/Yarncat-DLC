@@ -1,0 +1,265 @@
+/* ═══ 毛球貓 DLC：老大貓 ═══
+   裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），重開毛球貓。
+   「毛色」多了「老大」；「玩具」多了「小魚乾」，每一隻貓都會玩（狀態視窗「狀態」分頁選）。
+   要毛球貓 1.6.0 以上，商店版、GitHub 版都可以。以前的 boss-gym.yarncat 拆成了這個和 gym.yarncat（健身貓），舊的要刪掉。
+
+   這個檔案是 JavaScript：毛球貓開機時讀進來跑（主程式 src/index.html 的「DLC」），主程式的東西都用得到；
+   角色、玩具要提供哪些函式，見主程式的「角色」。這裡的 const、function 只有這個檔案看得到，不會跟主程式、別的 DLC 撞名。
+   測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次），按 c 換到老大、y 換到小魚乾。
+   老大閒著時按 p 巡視地盤；選了小魚乾，叼著閒著時按 f 趴下來啃。 */
+if (typeof TOYS !== 'object') throw new Error('要毛球貓 1.6.0 以上');   // 1.5 的主程式還不能加玩具
+
+Object.assign(C, {
+  Fb: '#d1a462', Fl: '#ecd29a', Fd: '#9c7440',          // 小魚乾
+  Sx: '#f2d3b8',                                       // 老大貓臉上的疤
+});
+Object.assign(COATS, {
+  boss: { F: '#b8693a', D: '#7e4220', W: '#efe2cf', G: '#e0b83c' },   // 老大貓：深一點的橘紅大公貓，臉見「老大貓」
+});
+Object.assign(COAT_NAMES, { boss: '老大' });
+
+/* ═══ 老大貓：臉上有疤的大公貓（毛色選「老大」就是牠） ═══
+   外觀：沿用每個姿勢，再加腮幫子、缺一角的耳朵、半瞇的眼睛、額頭一道疤（dress）。
+   專屬行為：巡視地盤（patrol），慢慢走，偶爾停下來左右張望。玩具選了小魚乾的話，就叼著小魚乾巡（見下面的「小魚乾」）。 */
+Object.assign(ZH, { patrol: '巡視地盤' });
+Object.assign(RATE, { patrol: 14 });
+PETTABLE.push('patrol');
+
+CHARS.boss = {
+  dress(pose) {                                        // 老大的臉
+    const parts = pose[0].slice(), det = pose[1].slice();
+    const head = sideHead(parts);
+    if (head) {
+      const [hx, hy, , hh] = head;
+      const ear = parts.findIndex(([x, y, w, h]) => x === hx && y === hy - 2 && w === 2 && h === 2);
+      if (ear >= 0) parts[ear] = [hx, hy - 1, 2, 1, 'F'];   // 後面那隻耳朵缺了上半
+      parts.push([hx - 1, hy + 2, 9, hh - 1, 'F']);    // 腮幫子：頭往後、往下多一圈
+      for (const [x, y, w, , c] of pose[1])            // 半瞇：眼睛上半蓋一條深色眼皮
+        if (c === 'G' && x >= hx && x < hx + 8 && y >= hy && y < hy + hh) det.push([x, y, w, 1, 'D']);
+      det.push([hx + 3, hy, 1, 1, 'Sx'], [hx + 4, hy + 1, 1, 1, 'Sx']);   // 額頭往眼睛斜斜一道疤
+    }
+    return [parts, det];
+  },
+  pose(f) { return cat.state === 'patrol' ? standPose(cat.paw ? 0 : f) : null; },   // 停下來環顧時腳不動
+  idle() {                                             // 偶爾巡視地盤；地上有小魚乾就先讓玩具去叼
+    if (cat.energy < 30 || (toy === 'fish' && fishFree() && !cat.fishCD) || Math.random() >= 0.2) return false;
+    cat.target = rand(20, W - 20); cat.paw = 0;
+    setState('patrol', trek(0.3));
+    return true;
+  },
+  off() { if (cat.state === 'patrol') setState('sit', 60); },   // 換成別的毛色：不巡了，不然會卡住
+  step() {
+    if (cat.state !== 'patrol') return;                // 慢慢走，偶爾停下來左右張望
+    if (wantTreat()) return goTreat();
+    if (cat.paw) {
+      cat.paw--;
+      if (cat.paw === 50 || cat.paw === 20) cat.dir = -cat.dir;
+      return;
+    }
+    if (Math.random() < 1 / 240) { cat.paw = 70; return; }
+    if (goTo(cat.target, 0.3) || cat.t > cat.dur) setState('sit', rand(120, 200));
+  },
+  key(k) {                                             // p 巡視地盤
+    if (k === 'p') { cat.target = cat.x < W / 2 ? W - 30 : 30; cat.paw = 0; setState('patrol', trek(0.3)); }
+  },
+};
+
+/* ═══ 小魚乾：每一隻貓都會玩的玩具（狀態視窗「玩具」選「小魚乾」） ═══
+   選了就從上面掉一條下來，貓走過去叼起來（toFish → grab）。走路、坐著、趴著的時候叼在嘴上（CARRY）；
+   要玩、要睡、被拎起來就先放在地上，忙完再回去叼。叼著閒著時，偶爾趴下來用前掌夾著啃（gnaw）。
+   你把小魚乾拿走（從嘴上抽走、從地上撿起來）牠就跟著走（wantFish），拿太高或太久就坐下來瞪你（glare）。
+   跟客人碰完鼻子，把小魚乾留給客人啃（請客）。小魚乾可以拖、甩、丟；換成別的玩具就收掉。 */
+let fish = null;                                       // 放在地上（或被你拿著）的小魚乾 { x, y, vx, vy, held, landed, dir }；叼在嘴上時是 null、cat.fish 是 true
+cat.fish = false; cat.fishCD = 0; cat.mouth = [7, -14];   // fishCD：多久之內不理小魚乾（瞪完你、請完客）；mouth：最後叼著時嘴巴在哪
+Object.assign(ZH, { gnaw: '啃小魚乾', toFish: '去叼小魚乾', grab: '叼起小魚乾', wantFish: '跟著小魚乾走', glare: '瞪你' });
+Object.assign(RATE, { gnaw: 12, toFish: 9, grab: 8, wantFish: 9, glare: 30 });
+PETTABLE.push('gnaw');
+HALF.fish = 4; TOP.fish = 4;
+// 叼得住小魚乾的狀態：站著、坐著、趴著。其他狀態一進去就先把小魚乾放下
+// （away：在隔壁作客，小魚乾跟著去；巡視地盤是老大貓的；走去健身器材也叼著，跳上去才放下）
+const CARRY = ['sit', 'stare', 'walk', 'patrol', 'rest', 'beg', 'leave', 'away', 'arrive', 'meet', 'toTree', 'toLitter', 'zoom', 'toBench', 'toMill', 'toLat'];
+// 你拿著小魚乾時，這些狀態會放下手邊的事跟過來
+const FISHY = ['sit', 'lick', 'walk', 'stare', 'rest', 'patrol', 'gnaw', 'beg', 'toFish', 'grab'];
+function mouthOf(s) {                                  // 叼小魚乾時嘴巴在哪（相對腳底正中間，面向右）：坐著、趴著、站著
+  if (['sit', 'stare', 'beg', 'glare'].includes(s)) return [7, -14];   // 比嘴巴低一格，小魚乾的黑邊才不會蓋到眼睛
+  if (s === 'rest') return [9, -8];
+  return [12, -9];
+}
+// 小魚乾：(0, 0) 是叼著的那一點，魚頭朝後、魚尾朝前
+const FISH_P = [[-2, -1, 6, 3, 'Fb'], [4, -2, 2, 1, 'Fb'], [4, 2, 2, 1, 'Fb']];
+const FISH_D = [[0, -1, 3, 1, 'Fl'], [-1, 1, 4, 1, 'Fd'], [-1, -1, 1, 1, 'O']];
+
+function gnawPose(f) {                                 // 趴著，前掌夾著地上的小魚乾，頭一點一點地啃
+  const b = f % 2;
+  const parts = [
+    [-15, -3, 4, 2, 'F'],                              // 尾巴
+    [-12, -6, 19, 6, 'F'], [-11, -8, 17, 2, 'F'], [-9, -9, 12, 1, 'F'],
+    [6, -2, 7, 2, 'F'],                                // 前腳往前伸
+    [6, -10 + b, 8, 6, 'F'], [6, -12 + b, 2, 2, 'F'], [11, -12 + b, 2, 2, 'F'],
+  ];
+  const det = [
+    [-7, -9, 1, 3, 'D'], [-4, -9, 1, 3, 'D'], [-1, -9, 1, 2, 'D'], [11, -2, 2, 1, 'W'],
+    [10, -7 + b, 4, 3, 'W'], [13, -7 + b, 1, 1, 'P'], [10, -8 + b, 2, 1, 'E'],
+    [7, -11 + b, 1, 1, 'P'], [12, -11 + b, 1, 1, 'P'],
+  ];
+  return [parts, det];
+}
+
+function dropFish() {                                  // 嘴上的小魚乾放下來（從最後叼著的地方掉下去）
+  const [mx, my] = cat.mouth;
+  fish = { x: clamp(cat.x + cat.dir * mx, 4, W - 4), y: Math.min(FLOOR, cat.y + my + 2), vx: cat.vx * 0.5, vy: 0, held: false, landed: false, dir: cat.dir };
+  cat.fish = false;
+}
+const fishFree = () => fish && !fish.held && fish.landed;
+const fishNear = () => fishFree() && Math.abs(fish.x - (cat.x + cat.dir * 12)) < 6;
+function startGnaw() {                                 // 把小魚乾放在前掌之間，趴下來啃
+  if (!cat.fish) return;
+  const at = cat.x + cat.dir * 15;
+  if (at < 4 || at > W - 4) cat.dir = -cat.dir;        // 前面頂到畫面邊邊：轉過身再趴
+  fish = { x: cat.x + cat.dir * 15, y: FLOOR, vx: 0, vy: 0, held: false, landed: true, dir: cat.dir };
+  fish.spot = fish.x;                                  // 放在哪：被撥走、拿走就不啃了
+  cat.fish = false;
+  setState('gnaw', rand(400, 700));
+}
+function pickUp() {                                    // 叼起來
+  fish = null; cat.fish = true;
+  setState(Math.random() < 0.5 ? 'sit' : 'walk', rand(90, 150));
+  cat.target = clamp(cat.x + cat.dir * rand(30, 80), 14, W - 14);
+}
+
+TOYS.fish = {
+  name: '小魚乾',
+  dress(pose) {                                        // 叼著的小魚乾畫在貓前面那層
+    if (!cat.fish) return null;
+    const [mx, my] = cat.mouth;
+    return [pose[0], pose[1], [shift(FISH_P, mx, my), shift(FISH_D, mx, my)]];
+  },
+  pose(f) {
+    switch (cat.state) {
+      case 'gnaw': return gnawPose(f);
+      case 'toFish': return standPose(f);
+      case 'grab': return eatPose(f, true);
+      case 'wantFish': return cat.lv === -2 ? standPose(f) : sitPose(f, 'want');
+      case 'glare': return sitPose(f, 'stare');
+      default: return null;
+    }
+  },
+  box() {
+    const x = cat.x, y = cat.y;
+    if (cat.state === 'gnaw') return { x0: x - 16, y0: y - 13, x1: x + 15, y1: y + 1 };
+    if (cat.state === 'glare' || (cat.state === 'wantFish' && cat.lv !== -2)) return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    return null;
+  },
+  hitFront(p) {                                        // 小魚乾：叼著的也抓得到
+    if (cat.fish) {
+      if (!CARRY.includes(cat.state) || cat.state === 'away') return null;
+      const [mx, my] = cat.mouth, fx = cat.x + cat.dir * (mx + 1.5), fy = cat.y + my;
+      return Math.abs(p.x - fx) <= 5 && Math.abs(p.y - fy) <= 3 ? 'fish' : null;
+    }
+    return fish && !fish.held && Math.abs(p.x - fish.x - 1) <= 5 && p.y >= fish.y - 5 && p.y <= fish.y + 1 ? 'fish' : null;
+  },
+  grab(kind, p) {                                      // 從嘴上抽走小魚乾
+    if (kind !== 'fish' || !cat.fish) return;
+    fish = { x: p.x, y: p.y, vx: 0, vy: 0, held: true, landed: false, dir: cat.dir };
+    cat.fish = false;
+  },
+  obj: kind => kind === 'fish' ? fish : null,
+  idle() {                                             // 地上有小魚乾先去叼；叼著的話偶爾趴下來啃
+    if (fishFree() && !cat.fishCD) { setState('toFish', trek(0.6)); return true; }
+    if (!cat.fish || cat.energy < 30 || Math.random() >= 0.15) return false;
+    startGnaw();
+    return true;
+  },
+  off() {                                              // 換成別的玩具（每一格都會叫）：小魚乾收掉；正在玩小魚乾就坐下來，不然會卡住
+    if (fish) {
+      poof(fish.x, fish.y - 2);
+      if (drag && drag.obj === fish) { drag = null; document.body.classList.remove('grabbing'); }
+    }
+    fish = null; cat.fish = false;
+    if (this.pose(0)) setState('sit', 60);
+  },
+  step() {
+    if (!fish && !cat.fish)                            // 剛選了小魚乾：從上面掉一條下來，掉在貓面前
+      fish = { x: clamp(cat.x + cat.dir * 26, 4, W - 4), y: 0, vx: 0, vy: 0, held: false, landed: false, dir: cat.dir };
+    cat.fishCD = Math.max(0, cat.fishCD - 1);
+    if (fish && fish.held && !cat.fishCD && !quiet && cat.y >= FLOOR && !cat.perch && FISHY.includes(cat.state)) {
+      cat.lv = -2; cat.miss = 0;
+      setState('wantFish', 99999);                     // 小魚乾被拿走了！
+    }
+    switch (cat.state) {
+      case 'gnaw':                                     // 啃小魚乾：被拿走、移開了就起來
+        if (!fish || fish.held || !fish.landed || Math.abs(fish.x - fish.spot) > 4) { setState('sit', 30); break; }
+        if (cat.t % 48 === 24) puff('crumb', fish.x + cat.dir * rand(-1, 2), FLOOR - 3);
+        cat.energy = Math.min(100, cat.energy + 0.01);
+        if (wantTreat()) goTreat();
+        else if (cat.t > cat.dur) { fish = null; cat.fish = true; setState('lick', rand(90, 150)); }   // 啃夠了：叼回嘴上，舔舔嘴
+        break;
+
+      case 'toFish': {                                 // 走去地上的小魚乾
+        if (!fishFree()) { setState('sit', 60); break; }
+        let side = Math.sign(cat.x - fish.x) || -cat.dir;
+        if (fish.x + side * 12 < 12 || fish.x + side * 12 > W - 12) side = -side;   // 小魚乾貼著畫面邊邊：從另一邊叼，不然站不到嘴巴碰得到的地方
+        if (goTo(fish.x + side * 12, 0.6)) { cat.dir = -side; setState('grab', 30); }
+        else if (cat.t > cat.dur) setState('sit', 60);
+        break;
+      }
+
+      case 'grab':                                     // 低頭叼起來
+        if (!fishFree()) { setState('sit', 60); break; }
+        if (cat.t > cat.dur) fishNear() ? pickUp() : setState('toFish', trek(0.6));
+        break;
+
+      case 'wantFish': {                               // 小魚乾被你拿著：跟著走到底下，坐著仰頭討
+        if (!fish || !fish.held) { setState('sit', 20); break; }
+        const tx = clamp(fish.x - cat.dir * 8, 12, W - 12);
+        if (Math.abs(fish.x - cat.x) > 3) cat.dir = Math.sign(fish.x - cat.x);
+        if (Math.abs(tx - cat.x) > (cat.lv === -2 ? 1 : 10)) {
+          cat.lv = -2;
+          cat.x += Math.sign(tx - cat.x) * Math.min(0.9, Math.abs(tx - cat.x));
+        } else cat.lv = -1;
+        if (FLOOR - fish.y > 34) cat.miss++;           // 拿太高，搆不到（跟貓條一樣，超過 34 就只能仰望）
+        if (cat.miss > 120 || cat.t > 900) setState('glare', 600);
+        break;
+      }
+
+      case 'glare':                                    // 坐著瞪你；還回來就去叼，不還就轉過頭不理你
+        if (!fish || !fish.held) { setState('sit', 20); break; }
+        cat.dir = Math.sign(fish.x - cat.x) || cat.dir;
+        if (cat.t > cat.dur) { cat.dir = -cat.dir; cat.fishCD = 1800; setState('sit', rand(240, 360)); }
+        break;
+
+      case 'boop':                                     // 跟客人碰鼻子：碰完把小魚乾留給客人啃
+        if (cat.t === 100 && guest && fishFree() && Math.abs(fish.x - guest.x) < 30) {
+          guestSet('boop', 360);
+          cat.fishCD = 600;
+          puff('heart', cat.x + cat.dir * 4, cat.y - 18);
+        }
+        break;
+    }
+    if (guest && guest.state === 'boop' && guest.t > 150 && fishFree() && guest.t % 48 === 24) puff('crumb', fish.x, FLOOR - 3);
+    if (cat.fish) {
+      if (CARRY.includes(cat.state)) cat.mouth = mouthOf(cat.state);
+      else dropFish();
+    }
+  },
+  update() {
+    if (!fish || fish.held) return;
+    settle(fish, 4, 0.8, 4);
+    if (fish.y >= FLOOR) fish.landed = true;
+  },
+  drawBack() { if (fish && !fish.held) drawRects(Math.round(fish.x), Math.round(fish.y) - 2, FISH_P, FISH_D, fish.dir); },
+  drawFront() {
+    if (fish && fish.held) drawRects(Math.round(fish.x), Math.round(fish.y) - 2, FISH_P, FISH_D, fish.dir);
+    if (cat.state === 'glare' && cat.t % 60 < 45) {    // 瞪你：頭上一閃一閃冒一個生氣的十字（亮 0.75 秒、暗 0.25 秒）
+      const x = Math.round(cat.x) + cat.dir * 2, y = Math.round(cat.y) - 27;
+      drawRects(x, y, [[0, 1, 1, 1, 'R'], [2, 1, 1, 1, 'R'], [1, 0, 1, 1, 'R'], [1, 2, 1, 1, 'R']], []);
+    }
+  },
+  resize(oldS) {
+    if (!fish) return;
+    if (S !== oldS) fish.x *= oldS / S;
+    fish.x = clamp(fish.x, 4, W - 4);
+    if (fish.landed) fish.y = FLOOR;
+  },
+  key(k) { if (k === 'f') startGnaw(); },             // f 趴下來啃小魚乾
+};
