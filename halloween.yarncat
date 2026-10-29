@@ -1,0 +1,420 @@
+/* ═══ 毛球貓 DLC：萬聖節 ═══
+   裝法：把這個檔案放進 圖片\YarnCat\dlc（狀態視窗「系統」→「打開 DLC 資料夾」；macOS 是 ~/Pictures/YarnCat/dlc），重開毛球貓。
+   「毛色」多了「黑貓」，一年到頭都在。萬聖節期間（10 月 1 日到 11 月 1 日）再多這些：
+     - 黑貓戴上巫婆帽。
+     - 地上多一顆南瓜燈（「家具」可以收起來），每一隻貓都會躲進去，從刻出來的眼睛往外偷看，眼睛跟著游標轉。
+       摸摸南瓜或點一下，牠就頂開蓋子蹦出來嚇你；把貓丟進去，牠就躲在裡面。
+     - 點一下南瓜燈：不給糖就搗蛋。裡面有貓是搗蛋（蹦出來嚇你），沒有貓就給糖（掉出一顆糖果，貓會跑過去撥著玩）。
+   是不是萬聖節，打開毛球貓的時候看電腦的日期決定；開著過了 11 月 1 日，要重開才會收起來。
+   要毛球貓 1.5.0 以上，商店版、GitHub 版都可以。
+
+   這個檔案是 JavaScript：毛球貓開機時讀進來跑（主程式 src/index.html 的「DLC」），主程式的東西都用得到；
+   角色、家具要提供哪些函式，見主程式的「角色」「DLC 家具」。這裡的 const、function 只有這個檔案看得到，不會跟主程式、別的 DLC 撞名。
+   測試：用瀏覽器打開主程式的 src/index.html，把這個檔案拖進視窗（會重新整理一次），按 c 換到黑貓。
+   閒著時按 j 躲進南瓜燈、k 從南瓜燈掉一顆糖果。不是萬聖節也想測試，把下面的 FROM、TO 改成包含今天。 */
+if (typeof furnCall !== 'function') throw new Error('要毛球貓 1.5.0 以上');   // 1.4 的主程式還不會擺 DLC 的家具
+
+const FROM = [10, 1], TO = [11, 1];                    // 萬聖節期間：[月, 日]，頭尾兩天都算。想整年都有就改成 [1, 1]、[12, 31]
+function inSeason(d = new Date()) {
+  const md = (d.getMonth() + 1) * 100 + d.getDate(), a = FROM[0] * 100 + FROM[1], b = TO[0] * 100 + TO[1];
+  return a <= b ? md >= a && md <= b : md >= a || md <= b;   // 跨年的期間（例如 [12, 20] 到 [1, 5]）也算得對
+}
+const SEASON = inSeason();
+
+Object.assign(C, {
+  Mh: '#5b3b8c', Ml: '#7f5cba', Mb: '#ff9b3d',          // 巫婆帽：帽子、帽子的亮面、帽帶
+  Uo: '#f08a24', Ul: '#ffb453', Ud: '#c2621b', Ui: '#6e3210',   // 南瓜：南瓜皮、亮面、紋路和陰影、蓋子和洞的切口
+  Us: '#6f8f3a', Ut: '#4d6628',                         // 南瓜蒂
+  Uy: '#ffd34d', Uw: '#fff1a6', Uf: '#ffae2b', Uk: '#2e1a12',   // 刻出來的洞：燭光、最亮的地方、燭光暗一點的時候、貓躲在裡面擋住光
+  Qa: '#ff7a3d', Qb: '#ffd08a', Qc: '#a56ae6', Qd: '#dcc6ff', Qe: '#45bf66', Qf: '#bdf0b3',   // 糖果：橘、紫、綠三種，各有糖紙
+});
+Object.assign(COATS, {
+  witch: { F: '#35343f', D: '#2a2933', W: '#3f3e4b', G: '#ffc83d', P: '#d98494' },   // 黑貓：一身黑、琥珀色的眼睛；萬聖節的巫婆帽見「黑貓」
+});
+Object.assign(COAT_NAMES, { witch: '黑貓' });
+
+/* ═══ 黑貓：萬聖節戴巫婆帽（毛色選「黑貓」就是牠） ═══
+   外觀：沿用每個姿勢，頭上加一頂帽尖往後彎的巫婆帽（dress）。側臉的姿勢照頭的位置戴；正面的臉（被拎起來、蹦出來嚇你）戴正面的帽子；
+   翻肚躺著時帽子掉在臉旁邊的地上。躲在紙箱裡時帽子露在箱口，探頭就跟著頂起來（drawFront）；躲在南瓜燈裡時帽子掛在南瓜蒂上。
+   南瓜燈每一隻貓都會躲，黑貓比較常去。 */
+// 帽子：(0, 0) 是頭的左上角。側面面向右，帽尖往後（左邊）彎；正面的帽尖往右歪
+const HAT_SIDE = [
+  [[-1, -3, 10, 1, 'Mh'], [1, -4, 6, 1, 'Mh'], [2, -5, 4, 1, 'Mh'], [2, -6, 3, 1, 'Mh'], [1, -7, 3, 1, 'Mh'], [0, -8, 2, 1, 'Mh']],
+  [[1, -4, 6, 1, 'Mb'], [4, -5, 1, 1, 'Ml'], [4, -6, 1, 1, 'Ml'], [3, -7, 1, 1, 'Ml']],
+];
+const HAT_FRONT = [
+  [[-1, -3, 11, 1, 'Mh'], [2, -4, 5, 1, 'Mh'], [3, -5, 3, 1, 'Mh'], [3, -6, 3, 1, 'Mh'], [4, -7, 2, 1, 'Mh'], [5, -8, 2, 1, 'Mh']],
+  [[2, -4, 5, 1, 'Mb'], [5, -5, 1, 1, 'Ml'], [5, -6, 1, 1, 'Ml']],
+];
+const hat = ([p, d], x, y) => [shift(p, x, y), shift(d, x, y)];
+const frontHead = parts => parts.find(([, , w, h, c]) => c === 'F' && w === 9 && h === 8);   // 正面的臉：被拎起來、從紙箱蹦出來
+
+const WITCH = {
+  dress(pose, who) {
+    const parts = pose[0].slice(), det = pose[1].slice();
+    let worn = null;                                   // 躲在南瓜燈裡的姿勢是空的，找不到頭：帽子由南瓜燈掛在蒂上
+    if (who === 'cat' && onBack()) worn = hat(HAT_SIDE, 17, 2);   // 翻肚躺著：帽子掉在臉旁邊的地上
+    else {
+      const side = sideHead(parts), front = !side && frontHead(parts);
+      if (side) worn = hat(HAT_SIDE, side[0], side[1]);
+      else if (front) worn = hat(HAT_FRONT, front[0], front[1]);
+    }
+    if (worn) { parts.push(...worn[0]); det.push(...worn[1]); }
+    return [parts, det];
+  },
+  drawFront() {                                        // 躲在紙箱裡：主程式的 drawPeek 只畫耳朵和眼睛，帽子補在箱口，探頭時跟著頂起來
+    if (cat.state !== 'hide' || cat.in !== 'box' || !box.on) return;
+    const k = cat.t % 300, nap = quiet || cat.energy < 30;   // 探頭的時機照 drawPeek 算：臉在 (箱子, 箱底 + 8 - up)
+    const up = nap ? 0 : k < 200 ? 0 : k < 208 ? k - 200 : k < 280 ? 8 : Math.max(0, 288 - k);
+    const [p, d] = hat(HAT_FRONT, -4, -19);
+    drawRects(boxX(), Math.round(box.y) + 8 - up, p, d);
+  },
+};
+
+/* ═══ 南瓜燈（家具，每一隻貓都會躲） ═══
+   一顆刻了臉的大南瓜，裡面點著電子蠟燭（貓躲進去也不會燙到），眼睛、嘴巴透出一閃一閃的燭光。
+   躲南瓜燈：跟紙箱輪流（見 goLantern 上面），壓低身體溜到旁邊，跳進去（toLantern）。躲在裡面（lurk）時擋住了光，刻出來的眼睛變成貓的眼睛，跟著游標轉、偶爾眨眼，
+   南瓜偶爾晃一下；睏了就在裡面睡。躲夠了自己跳出來；毛球、糖果滾過去就撲出來抓；
+   摸摸南瓜、點一下，就頂開蓋子蹦出來嚇你（lanternBoo），跳出來炸毛（主程式的 spook）。
+   點一下沒有貓的南瓜燈：從蓋子掉出一顆糖果（最多 3 顆），貓會跑過去撥著玩（toCandy → batCandy）。糖果放久了會不見。
+   貓在裡面時 cat.in 是 'pumpkin'，南瓜整顆再畫一次蓋在貓前面（over），所以看起來在南瓜裡面。
+   貓在裡面時把南瓜拎起來：貓露出來，嚇一跳。 */
+const RIM = 16;                                        // 南瓜頂（蓋子）離地多高
+const MAX_CANDY = 3;
+const CANDY_LIFE = 10800;                              // 糖果落地後放多久會不見（3 分鐘，被撥一下重新算）
+const CALM = ['sit', 'lick', 'stare', 'walk', 'rest'];   // 閒著：看到糖果掉出來會跑過去
+const CANDY_COLORS = [['Qa', 'Qb'], ['Qc', 'Qd'], ['Qe', 'Qf']];
+let rubbing = { x: null, dir: 0, flips: 0, last: 0 };  // 摸南瓜：游標在南瓜上左右來回（跟主程式摸紙箱一樣，來回兩次就蹦出來）
+
+// 南瓜：(0, 0) 是底邊正中間，刻的臉朝前，不分左右
+const BODY = [
+  [-7, -16, 14, 1, 'Uo'], [-9, -15, 18, 1, 'Uo'], [-10, -14, 20, 1, 'Uo'],
+  [-11, -13, 22, 10, 'Uo'], [-10, -3, 20, 1, 'Uo'], [-9, -2, 18, 2, 'Uo'],
+];
+const SKIN = [                                         // 南瓜皮：一瓣一瓣的紋路、左上的亮面、底下的陰影
+  [-8, -14, 2, 1, 'Ul'], [-9, -12, 1, 5, 'Ul'], [-10, -10, 1, 2, 'Ul'],
+  [-6, -15, 1, 2, 'Ud'], [5, -15, 1, 2, 'Ud'], [-9, -6, 1, 3, 'Ud'], [8, -6, 1, 3, 'Ud'], [9, -12, 1, 7, 'Ud'],
+  [-8, -1, 16, 1, 'Ud'], [-1, -3, 2, 2, 'Ud'],
+];
+const LID = [[-4, -16, 1, 1, 'Ui'], [-3, -15, 2, 1, 'Ui'], [-1, -16, 2, 1, 'Ui'], [1, -15, 2, 1, 'Ui'], [3, -16, 1, 1, 'Ui']];   // 蓋子的鋸齒切口
+const STEM = [[-1, -19, 2, 3, 'Us'], [1, -20, 2, 1, 'Us']];   // 南瓜蒂，往右捲
+const STEM_D = [[-1, -19, 1, 3, 'Ut']];
+// 刻出來的洞：兩隻三角眼、兩頭往上翹的大嘴（左右對稱，中線在 -0.5）；牙齒是沒挖掉的南瓜肉
+const HOLES = [
+  [-5, -11, 1, 1], [-6, -10, 3, 1], [-7, -9, 5, 1], [4, -11, 1, 1], [3, -10, 3, 1], [2, -9, 5, 1],
+  [-8, -6, 1, 1], [7, -6, 1, 1], [-7, -5, 14, 1], [-6, -4, 12, 1],
+];
+const TEETH = [[-3, -5, 1, 1, 'Uo'], [2, -5, 1, 1, 'Uo'], [-1, -4, 2, 1, 'Uo']];
+const GLOW = [[-6, -9, 2, 1], [3, -9, 2, 1], [-2, -5, 4, 1]];   // 燭光最亮的地方
+const EYES = [-6, 3];                                  // 貓躲在裡面時，兩隻眼睛在哪（2×2，剛好在兩個三角眼的下半）
+function cutOf(rects) {                                // 洞的切口：離洞一格以內（含斜角）、又不在洞裡的格子，同一列相鄰的併成一條
+  const at = (x, y) => x + ',' + y, hole = new Set(), rim = new Map();
+  for (const [x, y, w, h] of rects) for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) hole.add(at(x + i, y + j));
+  for (const k of hole) {
+    const [x, y] = k.split(',').map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) if (!hole.has(at(x + dx, y + dy))) rim.set(at(x + dx, y + dy), [x + dx, y + dy]);
+  }
+  const px = [...rim.values()].sort((a, b) => a[1] - b[1] || a[0] - b[0]), runs = [];
+  for (const [x, y] of px) {
+    const r = runs[runs.length - 1];
+    if (r && r[1] === y && r[0] + r[2] === x) r[2]++; else runs.push([x, y, 1, 1]);
+  }
+  return runs;
+}
+const CUT = cutOf(HOLES);
+
+const dragged = g => g.held && (!drag || drag.obj !== g || drag.moved >= 1.5);   // 真的被拖走了（按下去還沒怎麼動，可能只是點一下）
+const ready = g => FURN.pumpkin === g && g.on && !dragged(g) && g.y >= FLOOR;    // 好好擺在地上：貓可以躲進去、待在裡面
+const shakeX = g => Math.round(g.x) + (g.shake ? (g.shake % 4 < 2 ? -1 : 1) : 0);   // 晃的時候左右晃（跟紙箱一樣）
+const inside = () => cat.in === 'pumpkin';
+const lidLift = g => g.pop < 0 ? 0 : Math.round(g.popH * Math.sin(Math.PI * Math.min(1, g.pop / 30)));   // 蓋子被頂起來多高
+const roomy = (g, s, d) => g.x + s * d >= 12 && g.x + s * d <= W - 12 ? s : -s;   // 南瓜 s 那一邊 d 格的地方站得下嗎（南瓜貼著畫面邊邊就換另一邊）
+
+/* 南瓜燈的畫面：[parts, det]，相對於底邊正中間。lurking：貓躲在裡面（洞是暗的，眼睛換成貓的眼睛）。
+   draw 墊在最底下畫一次；貓在裡面時 over 再畫一次蓋在貓前面（front）。貓正在進出（跳進來、蹦出來、掉進來）時，
+   前面那層不畫蒂頭和蓋子：蓋子被貓頂開了，畫在貓後面（draw 那一次），才不會疊在貓肚子上 */
+function lanternRects(g, front = false) {
+  const lift = lidLift(g), lurking = inside() && ['lurk', 'lanternBoo'].includes(cat.state);
+  const hatOn = myCoat === 'witch' && inside() && cat.state === 'lurk';   // 黑貓躲進去了：巫婆帽掛在南瓜蒂上（蓋住蒂頭）
+  const parts = [...BODY], det = [...SKIN];
+  const top = !front || cat.state === 'lurk';          // 要不要畫蒂頭、蓋子
+  if (top && !hatOn) { parts.push(...shift(STEM, 0, -lift)); det.push(...shift(STEM_D, 0, -lift)); }
+  if (top && lift) det.push([-4, -16, 8, 1, 'Uk'], ...shift([[-4, -17, 8, 1, 'Uo']], 0, -lift));   // 蓋子被頂開：露出裡面暗暗的洞口
+  else if (top) det.push(...LID);
+  if (lurking) {                                       // 貓擋住了燭光：洞是暗的，切口不明顯
+    for (const [x, y, w, h] of CUT) det.push([x, y, w, h, 'Ud']);
+    for (const [x, y, w, h] of HOLES) det.push([x, y, w, h, 'Uk']);
+    if (cat.state === 'lurk' && !(quiet || cat.energy < 30) && cat.t % 180 < 174) {   // 醒著：兩隻眼睛跟著游標轉，偶爾眨眼
+      const r = mouse.x > g.x + 3 ? 1 : mouse.x < g.x - 4 ? 0 : (cat.t >> 6) % 2;   // 游標在正前方：左右看來看去
+      for (const ex of EYES) det.push([ex, -10, 2, 2, 'G'], [ex + r, -10, 1, 2, 'E']);
+    }
+  } else {                                             // 燭光從洞裡透出來，一閃一閃；切口是深色的
+    const dim = flicker(g);
+    for (const [x, y, w, h] of CUT) det.push([x, y, w, h, 'Ui']);
+    for (const [x, y, w, h] of HOLES) det.push([x, y, w, h, dim ? 'Uf' : 'Uy']);
+    if (!dim) for (const [x, y, w, h] of GLOW) det.push([x, y, w, h, 'Uw']);
+  }
+  det.push(...TEETH);
+  if (hatOn) { const [p, d] = hat(HAT_SIDE, -4, -14 - lift); parts.push(...p); det.push(...d); }
+  return [parts, det];
+}
+function flicker(g) {                                  // 每 5 格決定一次要不要暗一下：用格數算，不用亂數（畫面不能動到遊戲的亂數）
+  return (Math.imul(Math.floor(g.t / 5), 2654435761) >>> 0) % 9 === 0;
+}
+
+/* ── 貓：溜進去、躲著、蹦出來、跳出來 ── */
+/* 什麼時候躲：跟紙箱共用主程式的 boxCD。計時到了先擲骰子，這一輪躲紙箱還是南瓜燈（turn），一般的貓一半一半，黑貓七成選南瓜燈；
+   輪到南瓜燈就把 boxCD 壓在 2，主程式就不會去紙箱，等貓閒下來問家具時再過來。這樣躲起來的次數跟沒裝 DLC 一樣
+   （量過：各躲各的話，貓有 36% 的時間躲著看不到，沒裝 DLC 是 20%）。紙箱收起來了，南瓜燈就自己計時（cd）。 */
+const PUMPKIN_TURN = { witch: 0.7 };                   // 輪到躲起來時選南瓜燈的機率（沒寫的毛色是 0.5）
+function goLantern(g) {
+  g.turn = null; g.cd = rand(10800, 21600);            // 紙箱收起來時：下一次 3～6 分鐘後
+  boxCD = rand(10800, 21600);                          // 紙箱的計時重新開始，跟主程式躲完紙箱一樣
+  setState('toLantern', trek(0.45));
+  return true;
+}
+function sneak(g) {                                    // 偷偷摸摸溜到南瓜旁邊，跳進去
+  if (!ready(g)) return setState('sit', 60);
+  const side = roomy(g, Math.sign(cat.x - g.x) || 1, 20);
+  if (goTo(g.x + side * 20, 0.45)) {
+    cat.dir = -side; cat.in = 'pumpkin';
+    hop(g.x, g.y, 16, 30, () => {
+      if (!ready(g) || Math.abs(cat.x - g.x) > 3) return tumble();   // 跳到一半南瓜被搬走了
+      note('lantern_hides');
+      setState('lurk', rand(2400, 4800));              // 躲個 40～80 秒
+    });
+  } else if (cat.t > cat.dur) setState('sit', 60);
+}
+function lurk(g) {                                     // 躲在南瓜裡：眼睛從刻的洞往外看；睏了（或安靜模式）就在裡面睡
+  cat.x = g.x; cat.y = g.y;
+  const nap = quiet || cat.energy < 30;
+  cat.energy = Math.min(100, cat.energy + (nap ? 0.15 : 0.005));
+  if (!nap && cat.t % 240 === 120 && Math.random() < 0.6) g.shake = 14;
+  if (!nap && cat.t > 120) {                           // 毛球、糖果滾過去：撲出來抓
+    if (toy === 'ball' && Math.hypot(ball.vx, ball.vy) > 0.8 && Math.abs(ball.x - g.x) < 36) return pop(g, ball.x, false);
+    const c = g.candy.find(c => Math.abs(c.vx) > 0.8 && Math.abs(c.x - g.x) < 36);
+    if (c) return pop(g, c.x, false);
+  }
+  if (!nap && rubbed(g)) return pop(g, mouse.x, true);
+  if (!quiet && (cat.t > cat.dur || (!nap && wantTreat()))) {   // 躲夠了自己出來；有貓條也出來（往貓條那邊跳）
+    if (wantTreat()) cat.dir = Math.sign(treat.x - g.x) || cat.dir;
+    cat.dir = roomy(g, cat.dir, 22);
+    hop(g.x + cat.dir * 22, FLOOR, 12, 28, () => { cat.in = null; setState('sit', rand(60, 120)); });
+  }
+}
+function rubbed(g) {                                   // 游標在南瓜上左右來回摸兩次了嗎（跟主程式摸紙箱一樣：每次換方向間隔 0.7 秒內才算連續）
+  const p = mouse, r = rubbing;
+  if (drag || !g.hit(p)) { rubbing = { x: null, dir: 0, flips: 0, last: 0 }; return false; }   // 拖著東西經過不算摸
+  let done = false;
+  if (r.x !== null && Math.abs(p.x - r.x) >= 1) {
+    const s = Math.sign(p.x - r.x), now = performance.now();
+    if (r.dir && s !== r.dir) {
+      r.flips = now - r.last < 700 ? r.flips + 1 : 1;
+      r.last = now;
+      if (r.flips >= 2) { r.flips = 0; done = true; }
+    }
+    r.dir = s;
+  }
+  r.x = p.x;
+  return done;
+}
+// 碰！頂開蓋子蹦出來：摸了、點了是嚇你（scare），毛球、糖果滾過去是撲出來抓
+function pop(g, toward, scare) {
+  cat.dir = Math.sign(toward - g.x) || cat.dir;
+  cat.in = 'pumpkin'; cat.x = g.x; cat.y = g.y;
+  Object.assign(g, { scare, pop: 0, popH: 8, shake: 16 });
+  if (scare) { quake = 12; note('lantern_boos'); }
+  bang(g.x + cat.dir * 11, g.y - 40);
+  setState('lanternBoo', scare ? 46 : 10);
+}
+function rise(g) {                                     // 蹦出來、舉高雙手定格一下，再跳出來
+  cat.x = g.x;
+  cat.y = g.y - Math.round(15 * Math.sin(Math.min(1, cat.t / 6) * Math.PI / 2));
+  if (cat.t < cat.dur) return;
+  cat.dir = roomy(g, cat.dir, 24);
+  hop(g.x + cat.dir * 24, FLOOR, 8, 24, () => {
+    cat.in = null;
+    if (g.scare) setState('spook', rand(70, 100)); else setState('stare', rand(10, 20));
+  });
+}
+
+/* ── 糖果：從蓋子跳出來，落地彈一下、滑一段；貓跑過去用前掌撥 ── */
+function giveCandy(g) {
+  if (g.candy.length >= MAX_CANDY) { g.shake = 10; return; }   // 糖果都在地上了：晃一下，沒有了
+  const [c, w] = CANDY_COLORS[g.kinds++ % CANDY_COLORS.length];
+  const s = Math.random() < 0.5 ? -1 : 1;
+  g.candy.push({ x: g.x + s * 2, y: g.y - RIM - 1, vx: s * rand(0.6, 1.3), vy: -rand(1.8, 2.4), c, w, life: CANDY_LIFE, landed: false, bored: 0 });
+  Object.assign(g, { pop: 0, popH: 3 });
+  note('candies');
+  if (!quiet && !cat.perch && !cat.in && cat.y >= FLOOR && cat.energy > 20 && CALM.includes(cat.state)) goCandy(g, g.candy[g.candy.length - 1]);   // 看到了！
+}
+function goCandy(g, c) { g.aim = c; g.bats = Math.round(rand(2, 4)); setState('toCandy', trek(0.9)); return true; }
+function moveCandy(g, c) {
+  c.vy += G; c.x += c.vx; c.y += c.vy;
+  if (c.y >= FLOOR) {
+    c.y = FLOOR;
+    if (c.vy > 1) { c.vy = -c.vy * 0.35; if (!c.landed) grit(c.x, FLOOR - 1, C[c.w]); }   // 落地彈一下
+    else c.vy = 0;
+    c.vx *= 0.94;                                      // 糖紙在地板上滑
+    if (Math.abs(c.vx) < 0.03) c.vx = 0;
+    c.landed = true;
+  }
+  if (c.x < 4) { c.x = 4; c.vx = Math.abs(c.vx) * 0.5; }
+  if (c.x > W - 4) { c.x = W - 4; c.vx = -Math.abs(c.vx) * 0.5; }
+  if (c.landed) c.life--;
+  c.bored = Math.max(0, c.bored - 1);
+}
+const landed = c => c.landed && c.y >= FLOOR && !c.vy;   // 躺在地上了（可能還在滑）
+const resting = c => landed(c) && Math.abs(c.vx) < 0.15;   // 停下來了：可以撥
+const near = c => Math.abs(c.x - cat.x) < 26;          // 近了：壓低身體慢慢靠過去
+function chaseCandy(g) {                               // 走到糖果旁邊坐下來撥；糖果還在飛、還在滑，就盯著它看
+  const c = g.aim;
+  if (!c || !g.candy.includes(c) || cat.t > cat.dur) return setState('sit', 60);
+  if (wantTreat()) return goTreat();                   // 有貓條！
+  if (!resting(c) && near(c)) { cat.dir = Math.sign(c.x - cat.x) || cat.dir; return; }
+  let side = Math.sign(cat.x - c.x) || -cat.dir;
+  if (c.x + side * 11 < 12 || c.x + side * 11 > W - 12) side = -side;   // 糖果貼著畫面邊邊：從另一邊撥
+  if (goTo(c.x + side * 11, near(c) ? 0.4 : 0.9) && resting(c)) {
+    cat.dir = -side;
+    setState('batCandy', 28);
+  }
+}
+function batCandy(g) {                                 // 坐著用前掌撥：前半舉起來，第 14 格拍下去
+  const c = g.aim;
+  if (!c || !g.candy.includes(c)) return setState('sit', 60);
+  if (cat.t === 14) {
+    g.bats--;                                          // 撲空也算一下，才不會一直撥不完
+    if (Math.abs(c.x - (cat.x + cat.dir * 9)) < 6 && c.y >= FLOOR - 3) {
+      c.vx = cat.dir * rand(1.1, 2.0); c.vy = -rand(0.4, 1.0);
+      c.life = CANDY_LIFE;
+      for (let i = 0; i < 2; i++) grit(c.x, FLOOR - 2, C[c.w], cat.dir * rand(0.2, 0.6), rand(-0.8, -0.3), 16);   // 糖紙沙沙響
+      note('candy_bats');
+      cat.energy -= 1;
+    }
+  }
+  if (cat.t > cat.dur) {
+    if (g.bats > 0 && cat.energy > 25 && !quiet) setState('toCandy', trek(0.9));   // 再追過去撥
+    else { c.bored = rand(3600, 7200); setState(Math.random() < 0.5 ? 'lick' : 'sit', rand(90, 150)); }   // 玩夠了；1～2 分鐘內不理這顆
+  }
+}
+function drawCandy(c) {
+  const fade = Math.min(1, c.life / 60);
+  if (fade <= 0) return;
+  ctx.globalAlpha = fade;
+  drawRects(Math.round(c.x), Math.round(c.y), [
+    [-1, -3, 3, 3, c.c], [-2, -2, 1, 1, c.w], [-3, -3, 1, 3, c.w], [2, -2, 1, 1, c.w], [3, -3, 1, 3, c.w],   // 中間的糖、兩頭扭起來的糖紙
+  ], [[-1, -3, 1, 1, 'W']]);                           // 糖果上的反光
+  ctx.globalAlpha = 1;
+}
+
+/* ── 主程式的「DLC 家具」會叫這些（this 就是這顆南瓜燈） ── */
+const PUMPKIN = {
+  name: '南瓜燈', desc: '貓會躲進去，點一下討糖',
+  // t：南瓜自己的時鐘（燭光閃爍）；cd：紙箱收起來時，還有幾格貓才想自己來躲（第一次 1～3 分鐘後）；shake：還要晃幾格
+  // pop：蓋子被頂開後過了幾格（-1 沒在頂）、popH 頂多高；scare：這次蹦出來是不是嚇人
+  // candy：地上的糖果 { x, y, vx, vy, c 糖果的顏色, w 糖紙的顏色, life 還能放多久, landed, bored 幾格內貓不理它 }；kinds：下一顆輪到哪個顏色
+  // aim：貓正在撥哪一顆；bats：這次還要撥幾下；turn：這一輪躲紙箱還是南瓜燈（'box'、'pumpkin'，還沒擲是 null）
+  t: 0, cd: rand(3600, 10800), shake: 0, pop: -1, popH: 0, scare: false, candy: [], kinds: 0, aim: null, bats: 0, turn: null,
+  draw() {
+    const g = this;
+    const [p, d] = lanternRects(g);
+    drawRects(shakeX(g), Math.round(g.y), p, d, 1, coatPal(myCoat));   // 用這隻貓的顏色表：躲在裡面時，洞裡是牠的眼睛顏色
+    if (inside() && cat.state === 'lurk' && (quiet || cat.energy < 30)) drawZ(shakeX(g) + 9, Math.round(g.y) - 17);   // 在裡面睡著了
+    for (const c of g.candy) drawCandy(c);
+  },
+  hit(p) { return inBox(p, { x0: this.x - 12, y0: this.y - 20, x1: this.x + 11, y1: this.y + 1 }); },
+  click() {                                            // 點一下：不給糖就搗蛋。貓躲在裡面就蹦出來嚇你，不然掉一顆糖果
+    if (inside() && cat.state === 'lurk') { if (!quiet) pop(this, drag && drag.obj === this ? drag.x0 : mouse.x, true); }   // 往點的那一邊撲
+    else if (inside()) this.shake = 10;                // 正在跳進跳出：晃一下就好
+    else giveCandy(this);
+    return true;
+  },
+  idle() {                                             // 貓閒著：地上有糖果就去撥；時間到了就溜進來躲（累了也會來，在裡面睡，跟紙箱一樣）
+    const g = this;
+    if (quiet || cat.perch || cat.in) return false;
+    const c = cat.energy > 30 && g.candy.filter(c => landed(c) && !c.bored && c.life > 600).sort((a, b) => Math.abs(a.x - cat.x) - Math.abs(b.x - cat.x))[0];
+    if (c && Math.random() < 0.5) return goCandy(g, c);
+    const due = box.on ? g.turn === 'pumpkin' : !g.cd;  // 這一輪輪到南瓜燈了；紙箱收起來時看自己的計時
+    return due && ready(g) && goLantern(g);
+  },
+  step() {
+    const g = this;
+    g.t++;
+    g.cd = Math.max(0, g.cd - 1); g.shake = Math.max(0, g.shake - 1);
+    if (g.pop >= 0 && ++g.pop > 30) g.pop = -1;
+    for (const c of g.candy) moveCandy(g, c);
+    g.candy = g.candy.filter(c => c.life > 0);
+    // 輪流躲（見 goLantern 上面）：紙箱的計時剩不到一格就擲骰子（boxCD 是小數，不會剛好是 1）；輪到南瓜燈時壓住紙箱的計時；主程式去躲紙箱了，這一輪就結束
+    if (!box.on || cat.state === 'toBox') g.turn = null;
+    else if (boxCD > 0 && boxCD <= 1 && !g.turn) g.turn = Math.random() < (PUMPKIN_TURN[myCoat] || 0.5) ? 'pumpkin' : 'box';
+    if (g.turn === 'pumpkin' && ready(g) && boxCD < 2) boxCD = 2;
+    // 貓從上面掉進南瓜口：就躲在裡面（跟丟進紙箱一樣）
+    if (cat.state === 'fall' && !cat.in && ready(g) && cat.vy > 0 && Math.abs(cat.x - g.x) < 7 && cat.y >= g.y - RIM && cat.y - cat.vy <= g.y - RIM + 6) cat.in = 'pumpkin';
+    if (inside()) {
+      if (cat.state === 'hop' || cat.state === 'fall') return;   // 跳進跳出、掉進來的時候交給主程式
+      if (dragged(g)) {                                // 南瓜被拎起來了：貓露出來，嚇一跳
+        cat.in = null; cat.y = FLOOR;
+        bang(cat.x, cat.y - 26);
+        return setState('spook', rand(70, 100));
+      }
+      if (cat.state === 'lurk') return lurk(g);
+      if (cat.state === 'lanternBoo') return rise(g);
+      if (['sit', 'sleep'].includes(cat.state)) { cat.x = g.x; cat.y = g.y; return setState('lurk', rand(1800, 3600)); }   // 掉進來了、安靜模式叫牠睡：就在裡面待著
+      return tumble();
+    }
+    if (cat.state === 'toLantern') sneak(g);
+    else if (cat.state === 'toCandy') chaseCandy(g);
+    else if (cat.state === 'batCandy') batCandy(g);
+  },
+  pose(f) {
+    switch (cat.state) {
+      case 'toLantern': return crouchPose(f, true);
+      case 'lurk': return [[], []];                    // 整隻縮在南瓜裡看不到（狀態視窗的小圖畫的是 over 的南瓜，洞裡有牠的眼睛）
+      case 'lanternBoo': return booPose();
+      case 'toCandy': {                                // 遠的時候小跑步過去；近了，糖果還在動就坐著盯，停了就壓低身體靠過去
+        const c = this.aim;
+        if (!c || !near(c)) return standPose(f);
+        return resting(c) ? crouchPose(f, true) : sitPose(f, 'stare');
+      }
+      case 'batCandy': return sitPose(cat.t < 14 ? 0 : 1, 'swipe');
+      case 'hop': {                                    // 跳進南瓜的後半段：縮成一團掉進去（撲跳的姿勢比南瓜寬，頭和尾巴會從兩邊露出來）
+        const j = cat.jump;
+        return inside() && j && Math.abs(j.x1 - this.x) < 2 && j.y1 >= this.y && cat.t > cat.dur * 0.55 ? sleepPose(0) : null;
+      }
+      default: return null;
+    }
+  },
+  box() {
+    const x = cat.x, y = cat.y;
+    if (cat.state === 'lurk') return { x0: 1, y0: 1, x1: 0, y1: 0 };   // 躲起來了：點到的是南瓜
+    if (cat.state === 'lanternBoo') return { x0: x - 9, y0: y - 24, x1: x + 9, y1: y + 1 };
+    if (cat.state === 'batCandy') return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    return null;
+  },
+  over() {                                             // 貓在南瓜裡（跳進去、躲著、蹦出來、掉進來）：整顆南瓜再畫一次，蓋在貓前面
+    if (!inside()) return null;
+    const g = this, [p, d] = lanternRects(g, true);
+    const dx = shakeX(g) - Math.round(cat.x), dy = Math.round(g.y) - Math.round(cat.y);
+    // over 會照貓面向哪邊左右翻過來畫；南瓜不翻，所以面向左的時候先翻一次
+    const place = ([x, y, w, h, c]) => [cat.dir > 0 ? x + dx : -x - w - dx, y + dy, w, h, c];
+    return [p.map(place), d.map(place)];
+  },
+  off() {                                              // 收起來了：地上的糖果也收掉（貓在裡面的話，主程式會讓牠掉出來）
+    for (const c of this.candy) poof(c.x, c.y - 2);
+    Object.assign(this, { candy: [], aim: null, pop: -1, shake: 0, turn: null });
+  },
+  key(k) {                                             // 網頁版測試：j 躲進南瓜燈、k 掉一顆糖果
+    if (k === 'j' && ready(this)) goLantern(this);
+    if (k === 'k') giveCandy(this);
+  },
+};
+
+/* ═══ 登記：萬聖節期間才有巫婆帽和南瓜燈 ═══ */
+if (SEASON) {
+  CHARS.witch = WITCH;
+  Object.assign(ZH, { toLantern: '溜進南瓜燈', lurk: '躲在南瓜燈裡', lanternBoo: '從南瓜燈蹦出來嚇你', toCandy: '去撥糖果', batCandy: '撥糖果' });
+  Object.assign(RATE, { toLantern: 12, lurk: 10, lanternBoo: 99, toCandy: 9, batCandy: 99 });   // 99：動畫自己算，不靠 frame
+  BUSY.push('lurk', 'lanternBoo');                     // 躲著、蹦出來的時候，丟毛球、換玩具都不理
+  HALF.pumpkin = 12; TOP.pumpkin = 20;
+  FURN.pumpkin = PUMPKIN;
+}
