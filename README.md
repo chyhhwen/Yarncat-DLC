@@ -61,3 +61,8 @@ DLC 是程式碼，會在毛球貓裡執行：只裝信任的人給的 `.yarncat
 - **出錯**：瀏覽器的開發人員工具（F12）看得到錯在哪一行，檔名是 `dlc/` 加上檔案名稱，例如 `dlc/boss-gym.yarncat`。桌寵版的錯誤會寫在狀態視窗的「系統」分頁。
 - **WebStorm**：到 Settings → Editor → File Types → JavaScript，加上 `*.yarncat`，才會當成 JavaScript 上色、檢查。
 - **主程式改版**：主程式改了 DLC 用到的名字，那個 DLC 就會出錯。主程式不會因此停住：載入時出錯就整個不載入，跑到一半出錯就停掉那隻貓的專屬動作、收掉出錯的家具。所以主程式改版之後，每個 DLC 都用上面的方法測一次。
+
+## 授權
+
+本專案採用 [PolyForm Noncommercial 1.0.0](LICENSE.md)。
+個人、教育、非營利用途可免費使用；商業用途請聯絡作者。
